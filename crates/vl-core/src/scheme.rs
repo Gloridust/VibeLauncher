@@ -456,7 +456,25 @@ mod imp {
 
     /// A tiny AppleScript applet: macOS hands URLs to apps as Apple Events,
     /// which `on open location` receives.
-    fn build_router(paths: &Paths) -> Result<PathBuf> {
+    const LSREGISTER: &str =
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
+    fn is_router(h: Option<&str>) -> bool {
+        h.is_some_and(|h| h.eq_ignore_ascii_case(ROUTER_BUNDLE_ID))
+    }
+
+    /// The main schemes (other than `except`) currently routed to us.
+    fn claimed_schemes(except: &str) -> Vec<&'static str> {
+        ProviderKind::ALL
+            .iter()
+            .map(|p| p.schemes()[0])
+            .filter(|s| *s != except && is_router(current_handler(s).as_deref()))
+            .collect()
+    }
+
+    /// Build the router declaring exactly `schemes`, so a scheme we let go of
+    /// isn't still claimed by it.
+    fn build_router(paths: &Paths, schemes: &[&str]) -> Result<PathBuf> {
         let app = router_app(paths);
         let exe = crate::paths::self_exe();
         let script = format!(
@@ -475,20 +493,19 @@ mod imp {
         plutil(&["-replace", "CFBundleIdentifier", "-string", ROUTER_BUNDLE_ID])?;
         plutil(&["-replace", "CFBundleName", "-string", "VibeLauncher Router"])?;
         plutil(&["-replace", "LSUIElement", "-bool", "YES"])?;
-        plutil(&[
-            "-replace",
-            "CFBundleURLTypes",
-            "-json",
-            r#"[{"CFBundleURLName":"VibeLauncher","CFBundleURLSchemes":["claude","codex"]}]"#,
-        ])?;
+        let types = serde_json::json!([{ "CFBundleURLName": "VibeLauncher", "CFBundleURLSchemes": schemes }]).to_string();
+        plutil(&["-replace", "CFBundleURLTypes", "-json", &types])?;
         let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&app).status();
-        let _ = Command::new(
-            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-        )
-        .arg("-f")
-        .arg(&app)
-        .status();
+        let _ = Command::new(LSREGISTER).arg("-f").arg(&app).status();
         Ok(app)
+    }
+
+    fn remove_router(paths: &Paths) {
+        let app = router_app(paths);
+        if app.exists() {
+            let _ = Command::new(LSREGISTER).arg("-u").arg(&app).status();
+            let _ = std::fs::remove_dir_all(&app);
+        }
     }
 
     pub fn status(provider: ProviderKind, _install: Option<&AppInstall>, paths: &Paths) -> SchemeStatus {
@@ -514,7 +531,9 @@ mod imp {
                 crate::paths::write_atomic(&backup_file(paths, scheme), prev.as_bytes())?;
             }
         }
-        build_router(paths)?;
+        let mut schemes = claimed_schemes(scheme);
+        schemes.push(scheme);
+        build_router(paths, &schemes)?;
         set_handler(scheme, ROUTER_BUNDLE_ID)
     }
 
@@ -523,17 +542,34 @@ mod imp {
         let prev = std::fs::read_to_string(backup_file(paths, scheme)).ok().or_else(|| {
             install.and_then(|i| i.bundle.as_ref()).and_then(|b| crate::install::macos::plist_value(b, "CFBundleIdentifier"))
         });
-        if let Some(prev) = prev {
-            set_handler(scheme, prev.trim())?;
-        }
+        let restored = match prev.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(prev) => set_handler(scheme, prev),
+            None => Ok(()),
+        };
         let _ = std::fs::remove_file(backup_file(paths, scheme));
+        // Nothing to hand back to (or it was refused): stop declaring the
+        // scheme, so Launch Services falls back to whatever else handles it.
+        if is_router(current_handler(scheme).as_deref()) {
+            let rest = claimed_schemes(scheme);
+            if rest.is_empty() {
+                remove_router(paths);
+            } else {
+                build_router(paths, &rest)?;
+            }
+        }
+        if is_router(current_handler(scheme).as_deref()) {
+            restored?;
+            bail!("macOS still sends {scheme}:// links to VibeLauncher; choose another app for them in that app's settings");
+        }
         Ok(())
     }
 
     pub fn reassert(provider: ProviderKind, _install: &AppInstall, paths: &Paths) -> Result<()> {
         let scheme = provider.schemes()[0];
         if !router_app(paths).exists() {
-            build_router(paths)?;
+            let mut schemes = claimed_schemes(scheme);
+            schemes.push(scheme);
+            build_router(paths, &schemes)?;
         }
         if let Some(prev) = current_handler(scheme) {
             if !prev.eq_ignore_ascii_case(ROUTER_BUNDLE_ID) {

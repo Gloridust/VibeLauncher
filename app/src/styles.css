@@ -974,11 +974,42 @@ textarea.field {
   gap: 10px;
   align-items: flex-start;
 }
+/* Drawn here: WebKitGTK's own checkbox stays white in dark mode. */
 .check input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
   margin: 2px 0 0;
-  width: 15px;
-  height: 15px;
-  accent-color: var(--red);
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--field);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.check input::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border: solid #fff;
+  border-width: 0 0 2px 2px;
+  transform: rotate(-45deg) scale(0);
+  transition: transform 0.12s ease;
+}
+.check input:checked {
+  background: var(--red);
+  border-color: var(--red);
+}
+.check input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+.check input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
 }
 
 /* login steps */

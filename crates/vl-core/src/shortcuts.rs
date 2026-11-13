@@ -105,7 +105,7 @@ mod imp {
         let login = de::build_exec(&[exe.to_string(), "login".into(), p.id.clone()]);
         let manage = de::build_exec(&[exe.to_string()]);
         format!(
-            "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nComment={comment}\nExec={launch}\nIcon={icon}\nTerminal=false\nStartupNotify=true\nCategories=Network;Chat;\nNoDisplay=false\nActions=login;manage;\nX-VibeLauncher=true\nX-VibeLauncher-Profile={id}\n\n[Desktop Action login]\nName=Log in…\nExec={login}\n\n[Desktop Action manage]\nName=Manage profiles\nExec={manage}\n",
+            "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nComment={comment}\nExec={launch}\nIcon={icon}\nTerminal=false\nStartupNotify=true\nCategories=Network;Chat;\nNoDisplay=false\nActions=login;manage;\nX-VibeLauncher=true\nX-VibeLauncher-Profile={id}\n\n[Desktop Action login]\nName=Sign in…\nName[zh_CN]=登录…\nExec={login}\n\n[Desktop Action manage]\nName=Manage profiles\nName[zh_CN]=管理配置\nExec={manage}\n",
             comment = de::escape_string(&format!("Open {} with the “{}” profile", p.provider.display_name(), p.name)),
             icon = de::escape_string(&icon.to_string_lossy()),
             id = p.id,

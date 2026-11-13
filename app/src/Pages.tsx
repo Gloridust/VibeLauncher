@@ -14,7 +14,7 @@ import {
 } from "lucide-preact";
 import type { AppView, Check, Fix, Provider, Settings } from "./api";
 import { api, pickFile, PROVIDERS } from "./api";
-import { checkText, t } from "./i18n";
+import { checkText, localizeLogLine, t } from "./i18n";
 import { Segmented, Switch, useApp } from "./ui";
 
 function Topbar(props: { title: string; children?: preact.ComponentChildren }) {
@@ -159,7 +159,7 @@ export function Diagnostics(props: { checks: Check[] | null; recheck: () => Prom
                 <div class="row-main faint">{t("diag.logEmpty")}</div>
               </div>
             ) : (
-              <div class="log selectable">{[...log].reverse().join("\n")}</div>
+              <div class="log selectable">{[...log].reverse().map(localizeLogLine).join("\n")}</div>
             )}
           </div>
         </div>

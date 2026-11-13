@@ -259,9 +259,12 @@ mod tests {
         p.isolated = true;
         p.env.insert("FOO".into(), "bar".into());
         let s = build_launch_spec(&p, &paths, Path::new("/usr/bin/claude-desktop"), &[], None, Some("claude://x"));
-        assert_eq!(s.args[0], OsString::from("--user-data-dir=/tmp/vl/profiles/work/electron"));
+        let root = Path::new("/tmp/vl").join("profiles").join("work");
+        let mut udd = OsString::from("--user-data-dir=");
+        udd.push(root.join("electron"));
+        assert_eq!(s.args[0], udd);
         assert_eq!(s.args.last().unwrap(), &OsString::from("claude://x"));
-        assert!(s.set_env.contains(&("CLAUDE_CONFIG_DIR".into(), "/tmp/vl/profiles/work/claude-config".into())));
+        assert!(s.set_env.contains(&("CLAUDE_CONFIG_DIR".into(), root.join("claude-config").to_string_lossy().into_owned())));
         assert!(s.set_env.contains(&("FOO".into(), "bar".into())));
         assert!(s.remove_env.contains(&"CLAUDE_USER_DATA_DIR".to_string()));
     }

@@ -14,13 +14,15 @@ directories = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-sha2 = "0.10"
 url = "2"
 trash = "5"
 base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

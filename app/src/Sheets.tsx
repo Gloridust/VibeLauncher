@@ -204,6 +204,16 @@ export function DeleteSheet(props: { p: ProfileView; onClose: () => void; onDele
   const go = async () => {
     setBusy(true);
     try {
+      if (props.p.running) {
+        // Ask it to quit, then wait (up to 15 s) until it has.
+        await api.quit(props.p.id);
+        const until = Date.now() + 15000;
+        while (Date.now() < until) {
+          await new Promise((r) => setTimeout(r, 400));
+          const st = await api.state();
+          if (!st.profiles.find((x) => x.id === props.p.id)?.running) break;
+        }
+      }
       await api.deleteProfile(props.p.id, withData);
       await refresh();
       toast(t("delete.done", { name: props.p.name }));
@@ -216,7 +226,7 @@ export function DeleteSheet(props: { p: ProfileView; onClose: () => void; onDele
   return (
     <Sheet
       title={t("delete.title", { name: props.p.name })}
-      subtitle={t("delete.body")}
+      subtitle={t(props.p.running ? "delete.bodyRunning" : "delete.body")}
       onClose={props.onClose}
       onSubmit={go}
       footer={
@@ -226,7 +236,7 @@ export function DeleteSheet(props: { p: ProfileView; onClose: () => void; onDele
           </button>
           <button type="submit" class="btn danger" disabled={busy}>
             {busy && <Loader2 class="spin" />}
-            {t("delete.confirm")}
+            {t(props.p.running ? "delete.quitConfirm" : "delete.confirm")}
           </button>
         </>
       }

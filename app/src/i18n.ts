@@ -102,6 +102,8 @@ const en = {
   "delete.data": "Also move its data to the trash",
   "delete.dataHint": "Sign-in, chats and settings in {path}. Leave this off to keep them; creating a profile with the same data folder brings them back.",
   "delete.confirm": "Delete",
+  "delete.quitConfirm": "Quit and delete",
+  "delete.bodyRunning": "It's open now, so it quits first. Its shortcut is removed; the app itself isn't touched.",
   "delete.done": "Deleted “{name}”",
 
   "login.title": "Sign in to {name}",
@@ -284,6 +286,8 @@ const zh: Record<Key, string> = {
   "delete.data": "同时把它的数据移到废纸篓",
   "delete.dataHint": "{path} 里的登录状态、对话和设置。不勾选则保留；以后新建配置并选同一个数据文件夹即可恢复。",
   "delete.confirm": "删除",
+  "delete.quitConfirm": "退出并删除",
+  "delete.bodyRunning": "它正在运行，会先退出。会移除它的快捷方式，不会动应用本身。",
   "delete.done": "已删除“{name}”",
 
   "login.title": "登录“{name}”",
@@ -444,6 +448,19 @@ export function relativeTime(iso?: string): string {
   if (s < 86400) return t("time.hour", { n: Math.floor(s / 3600) });
   if (s < 86400 * 30) return t("time.day", { n: Math.floor(s / 86400) });
   return new Date(iso).toLocaleDateString(lang === "zh" ? "zh-CN" : undefined);
+}
+
+/** A link-log line starts with a UTC timestamp; show it in local time. */
+export function localizeLogLine(line: string): string {
+  const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)\s+(.*)$/.exec(line);
+  if (!m) return line;
+  const d = new Date(m[1]);
+  if (Number.isNaN(d.getTime())) return line;
+  const locale = lang === "zh" ? "zh-CN" : undefined;
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const when = sameDay ? time : `${d.toLocaleDateString(locale, { month: "short", day: "numeric" })} ${time}`;
+  return `${when}  ${m[2]}`;
 }
 
 export function formatBytes(n: number): string {

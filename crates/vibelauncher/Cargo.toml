@@ -1,0 +1,19 @@
+[package]
+name = "vibelauncher"
+description = "VibeLauncher command: opens profiles, routes claude:// and codex:// links, runs diagnostics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vibelauncher"
+path = "src/main.rs"
+
+[dependencies]
+vl-core = { path = "../vl-core" }
+anyhow = "1"
+serde_json = "1"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_System_Console"] }

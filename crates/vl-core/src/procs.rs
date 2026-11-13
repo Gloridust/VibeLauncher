@@ -29,6 +29,8 @@ pub struct RunningApp {
     /// Environment of the process, when readable (same user).
     #[serde(skip)]
     pub environ: Option<HashMap<String, String>>,
+    /// Whether `environ` could be read (shown by `vibelauncher ps`).
+    pub env_readable: bool,
 }
 
 pub struct Snapshot {
@@ -46,19 +48,45 @@ impl Snapshot {
                 .with_exe(UpdateKind::Always)
                 .with_environ(UpdateKind::Always),
         );
-        let mut apps = Vec::new();
+        // Every process once, with a normalized command line.
+        struct Info {
+            parent: Option<u32>,
+            cmd: Vec<String>,
+            env: Option<HashMap<String, String>>,
+        }
+        let mut all: HashMap<u32, Info> = HashMap::new();
         for (pid, p) in sys.processes() {
-            // Skip threads (Linux lists them as tasks).
             if p.thread_kind().is_some() {
                 continue;
             }
-            let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
-            if cmd.iter().any(|a| a.starts_with("--type=")) {
+            all.insert(
+                pid.as_u32(),
+                Info {
+                    parent: p.parent().map(|x| x.as_u32()),
+                    cmd: normalize_cmd(p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect()),
+                    env: parse_environ(p.environ()),
+                },
+            );
+        }
+        let mut apps = Vec::new();
+        for (pid, p) in sys.processes() {
+            if p.thread_kind().is_some() {
+                continue;
+            }
+            let Some(info) = all.get(&pid.as_u32()) else { continue };
+            if info.cmd.iter().any(|a| a.starts_with("--type=")) {
                 continue; // Chromium helper (renderer, GPU, zygote, …)
             }
             let exe = p.exe().map(Path::to_path_buf);
-            let Some(provider) = classify(exe.as_deref(), &cmd, installs) else { continue };
-            let udd = user_data_dir_arg(&cmd);
+            let Some(provider) = classify(exe.as_deref(), &info.cmd, installs) else { continue };
+            // A helper re-executing the main binary without --type= (rare)
+            // has a parent of the same app; skip it.
+            if let Some(parent) = info.parent.and_then(|pp| sys.process(sysinfo::Pid::from_u32(pp))) {
+                if parent.exe().is_some() && parent.exe() == p.exe() {
+                    continue;
+                }
+            }
+            let udd = user_data_dir_arg(&info.cmd);
             let profile_id = match &udd {
                 Some(dir) => cfg
                     .profiles
@@ -70,23 +98,26 @@ impl Snapshot {
                     .map(|pr| pr.id.clone()),
                 None => Some(provider.default_profile_id().to_string()),
             };
-            let environ = {
-                let env = p.environ();
-                (!env.is_empty()).then(|| {
-                    env.iter()
-                        .filter_map(|kv| {
-                            let s = kv.to_string_lossy();
-                            s.split_once('=').map(|(k, v)| (k.to_string(), v.to_string()))
-                        })
-                        .collect()
-                })
-            };
+            // Electron overwrites its own environment block when it sets the
+            // process title, so fall back to a child that inherited it
+            // (crashpad handler, Code-tab helpers, …).
+            let my = pid.as_u32();
+            let environ = info.env.clone().or_else(|| {
+                let crash_dir = udd.as_ref().map(|d| d.join("Crashpad").to_string_lossy().into_owned());
+                all.iter()
+                    .filter(|(_, i)| {
+                        i.parent == Some(my)
+                            || crash_dir.as_ref().is_some_and(|c| i.cmd.iter().any(|a| a.contains(c.as_str())))
+                    })
+                    .find_map(|(_, i)| i.env.clone())
+            });
             apps.push(RunningApp {
-                pid: pid.as_u32(),
+                pid: my,
                 provider,
                 profile_id,
                 user_data_dir: udd,
                 start_time: p.start_time(),
+                env_readable: environ.is_some(),
                 environ,
             });
         }
@@ -146,6 +177,44 @@ fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Opti
     None
 }
 
+/// Chromium rewrites its process title, which turns `/proc/<pid>/cmdline`
+/// into a single space-joined string. Split it back at ` --` boundaries (an
+/// executable path may itself contain spaces, flags never start mid-word).
+pub fn normalize_cmd(cmd: Vec<String>) -> Vec<String> {
+    if cmd.len() != 1 || !cmd[0].contains(" --") {
+        return cmd;
+    }
+    let s = &cmd[0];
+    let mut out = Vec::new();
+    let mut rest = s.as_str();
+    while let Some(i) = rest.find(" --") {
+        out.push(rest[..i].to_string());
+        rest = &rest[i + 1..];
+    }
+    out.push(rest.to_string());
+    out
+}
+
+/// Parse an environment block; `None` if it doesn't look like one. When
+/// Chromium sets its process title it overwrites the start of its own
+/// environment block, so the first entry must be a real variable.
+fn parse_environ(env: &[std::ffi::OsString]) -> Option<HashMap<String, String>> {
+    let valid_key = |k: &str| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let first = env.first()?.to_string_lossy();
+    if !first.split_once('=').is_some_and(|(k, _)| valid_key(k)) {
+        return None;
+    }
+    let m: HashMap<String, String> = env
+        .iter()
+        .filter_map(|kv| {
+            let s = kv.to_string_lossy();
+            let (k, v) = s.split_once('=')?;
+            valid_key(k).then(|| (k.to_string(), v.to_string()))
+        })
+        .collect();
+    (m.contains_key("PATH") || m.contains_key("HOME")).then_some(m)
+}
+
 /// The value of `--user-data-dir` (either `--user-data-dir=X` or `--user-data-dir X`).
 pub fn user_data_dir_arg(cmd: &[String]) -> Option<PathBuf> {
     let mut it = cmd.iter();
@@ -191,5 +260,9 @@ mod tests {
         assert_eq!(user_data_dir_arg(&v(&["x", "--user-data-dir=/a b"])), Some("/a b".into()));
         assert_eq!(user_data_dir_arg(&v(&["x", "--user-data-dir", "/c"])), Some("/c".into()));
         assert_eq!(user_data_dir_arg(&v(&["x"])), None);
+        let joined = normalize_cmd(v(&["/opt/My App/claude --user-data-dir=/a b/electron --type=gpu claude://x"]));
+        assert_eq!(joined[0], "/opt/My App/claude");
+        assert_eq!(user_data_dir_arg(&joined), Some("/a b/electron".into()));
+        assert!(joined.iter().any(|a| a.starts_with("--type=")));
     }
 }

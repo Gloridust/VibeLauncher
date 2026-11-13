@@ -1,0 +1,35 @@
+[package]
+name = "vl-core"
+description = "Core logic of VibeLauncher: profiles, app discovery, launching, callback routing and diagnostics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+directories = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+sha2 = "0.10"
+url = "2"
+trash = "5"
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+mslnk = "0.1"
+ico = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+icns = "0.3"
+core-foundation = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

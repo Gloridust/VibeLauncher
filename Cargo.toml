@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/vl-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Gloridust/VibeLauncher"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"

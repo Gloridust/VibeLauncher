@@ -28,3 +28,5 @@ node_modules/
 app/dist/
 *.log
 .DS_Store
+app/src-tauri/gen/
+app/src-tauri/binaries/

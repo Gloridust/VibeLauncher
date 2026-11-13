@@ -151,6 +151,11 @@ impl Launcher {
         let spec = self.launch_spec(&p.id, url)?;
         launch::spawn(&spec)?;
         let version = self.install(p.provider).and_then(|i| i.version);
+        // Another process (the window, a shortcut) may have changed the
+        // configuration since we read it; don't write back a stale copy.
+        if let Ok(fresh) = Config::load(&self.paths) {
+            self.config = fresh;
+        }
         if let Some(prof) = self.config.get_mut(&p.id) {
             prof.last_launched_at = Some(Utc::now());
         }
@@ -282,6 +287,10 @@ impl Launcher {
     /// The user picked a profile for an ambiguous callback.
     pub fn deliver_choice(&mut self, id: &str, url: &str) -> Result<()> {
         let p = self.profile(id)?;
+        let parsed = url::Url::parse(url.trim()).context("not a valid URL")?;
+        if !p.provider.schemes().contains(&parsed.scheme()) {
+            bail!("{} can't open {}:// links", p.provider.display_name(), parsed.scheme());
+        }
         router::PendingStore::new(&self.paths).log(&format!("{} → {} (chosen by you)", router::redact(url), p.id));
         self.deliver(&p.id, url, true)
     }
@@ -480,7 +489,8 @@ impl Launcher {
     }
 }
 
-fn dir_size(p: &std::path::Path, depth: u32) -> u64 {
+/// Total size of the files under `p` (symlinks not followed).
+pub fn dir_size(p: &std::path::Path, depth: u32) -> u64 {
     let Ok(meta) = std::fs::symlink_metadata(p) else { return 0 };
     if meta.is_file() {
         return meta.len();

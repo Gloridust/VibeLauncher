@@ -144,6 +144,11 @@ pub fn gui_exe() -> Option<PathBuf> {
     if let Some(over) = std::env::var_os("VIBELAUNCHER_GUI").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(over));
     }
+    // Inside an AppImage the image itself opens the window when run without
+    // a command.
+    if let Some(img) = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(img));
+    }
     let me = std::env::current_exe().ok()?.canonicalize().ok()?;
     let p = me.parent()?.join(name);
     p.is_file().then_some(p)

@@ -38,6 +38,10 @@ pub enum Fix {
 #[serde(rename_all = "camelCase")]
 pub struct Check {
     pub id: String,
+    /// Stable kind of finding; the window translates it using `params` and
+    /// falls back to `title` / `detail` (English).
+    pub code: &'static str,
+    pub params: BTreeMap<String, String>,
     pub level: Level,
     pub title: String,
     pub detail: String,
@@ -46,7 +50,12 @@ pub struct Check {
 
 impl Check {
     fn new(id: impl Into<String>, level: Level, title: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self { id: id.into(), level, title: title.into(), detail: detail.into(), fix: None }
+        Self { id: id.into(), code: "", params: BTreeMap::new(), level, title: title.into(), detail: detail.into(), fix: None }
+    }
+    fn code(mut self, code: &'static str, params: &[(&str, String)]) -> Self {
+        self.code = code;
+        self.params = params.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+        self
     }
     fn fix(mut self, f: Fix) -> Self {
         self.fix = Some(f);
@@ -92,6 +101,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                     format!("{name} wasn't found"),
                     "Your profiles can't start until VibeLauncher knows where the app is. Install it, or choose it by hand.",
                 )
+                .code("app-missing", &[("app", name.into())])
                 .fix(Fix::ChooseApp { provider }),
             ),
             None => {
@@ -100,7 +110,8 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                     Level::Info,
                     format!("{name} isn't installed"),
                     "Nothing to do unless you want to use it.",
-                ));
+                )
+                .code("app-not-installed", &[("app", name.into())]));
                 continue;
             }
             Some(i) => out.push(Check::new(
@@ -108,6 +119,14 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 Level::Ok,
                 format!("{name} {}", i.version.as_deref().unwrap_or("")).trim().to_string(),
                 format!("{} ({})", i.bundle.as_ref().unwrap_or(&i.program).display(), i.source),
+            )
+            .code(
+                "app-found",
+                &[
+                    ("app", name.into()),
+                    ("version", i.version.clone().unwrap_or_default()),
+                    ("path", i.bundle.as_ref().unwrap_or(&i.program).display().to_string()),
+                ],
             )),
         }
 
@@ -122,7 +141,8 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                     Level::Warning,
                     format!("{scheme_name}:// links can't be routed"),
                     format!("{name} has no menu entry VibeLauncher can stand in for, so sign-in links open its default profile. Use “Paste link” when logging in to another profile."),
-                ));
+                )
+                .code("routing-unsupported", &[("app", name.into()), ("scheme", scheme_name.into())]));
             } else if !st.claimed || st.stale {
                 out.push(
                     Check::new(
@@ -135,16 +155,29 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                             format!("Sign-in links will open whichever {name} window the system picks.")
                         },
                     )
+                    .code(if st.stale { "routing-stale" } else { "routing-off" }, &[("app", name.into()), ("scheme", scheme_name.into())])
                     .fix(Fix::ClaimScheme { provider }),
                 );
             } else if let Some(c) = st.conflict {
-                out.push(Check::new(id, Level::Warning, "Another link handler is in the way", c).fix(Fix::ClaimScheme { provider }));
+                out.push(
+                    Check::new(id, Level::Warning, "Another link handler is in the way", c.clone())
+                        .code("routing-conflict", &[("app", name.into()), ("scheme", scheme_name.into()), ("detail", c)])
+                        .fix(Fix::ClaimScheme { provider }),
+                );
             } else {
                 let mut detail = format!("Links open in the profile that asked for them. Current handler: {}.", st.handler.as_deref().unwrap_or("?"));
                 if st.experimental {
                     detail.push_str(" (Experimental on this system.)");
                 }
-                out.push(Check::new(id, Level::Ok, format!("{scheme_name}:// links are routed"), detail));
+                out.push(Check::new(id, Level::Ok, format!("{scheme_name}:// links are routed"), detail).code(
+                    "routing-ok",
+                    &[
+                        ("app", name.into()),
+                        ("scheme", scheme_name.into()),
+                        ("handler", st.handler.clone().unwrap_or_default()),
+                        ("experimental", st.experimental.to_string()),
+                    ],
+                ));
             }
         }
 
@@ -170,6 +203,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                                 ProviderKind::ChatGpt => "Usually after an update restarted the app by itself. It now reads the shared ~/.codex data. Restart the profile to fix it.",
                             },
                         )
+                        .code("lost-env", &[("name", p.name.clone()), ("var", k.clone()), ("app", name.into())])
                         .fix(Fix::Restart { profiles: vec![p.id.clone()] }),
                     );
                 }
@@ -181,6 +215,14 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 Level::Info,
                 format!("A {name} window isn't from any profile"),
                 format!("Process {} uses {}.", app.pid, app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+            )
+            .code(
+                "unknown-instance",
+                &[
+                    ("app", name.into()),
+                    ("pid", app.pid.to_string()),
+                    ("dir", app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+                ],
             ));
         }
 
@@ -202,6 +244,10 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                     } else {
                         "Profiles you open from VibeLauncher get the new version automatically."
                     },
+                )
+                .code(
+                    "updated",
+                    &[("app", name.into()), ("old", old.clone()), ("new", v.clone()), ("defaultRunning", default_running.to_string())],
                 );
                 if default_running && !restart.is_empty() {
                     c = c.fix(Fix::Restart { profiles: restart });
@@ -234,6 +280,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                     format!("{} {name} profiles started at the same moment", together.len()),
                     "Instances that start together tend to update and restart together, which is when profiles get mixed up. Restarting them a few seconds apart avoids that.",
                 )
+                .code("simultaneous", &[("app", name.into()), ("count", together.len().to_string())])
                 .fix(Fix::Restart { profiles: together }),
             );
         }
@@ -245,7 +292,8 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 Level::Info,
                 "Cowork is shared between profiles",
                 "Claude's Cowork virtual machine is tied to your system account, not to a profile: only one profile at a time can use it.",
-            ));
+            )
+            .code("cowork", &[]));
         }
     }
 
@@ -269,6 +317,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 "Some shortcuts are missing or out of date",
                 broken.join(", "),
             )
+            .code("shortcuts", &[("names", broken.join(", "))])
             .fix(Fix::SyncShortcuts),
         );
     }
@@ -282,7 +331,8 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 Level::Error,
                 format!("“{}” can't use its data folder", p.name),
                 format!("{} exists but isn't a folder.", root.display()),
-            ));
+            )
+            .code("data-not-dir", &[("name", p.name.clone()), ("path", root.display().to_string())]));
         }
     }
 

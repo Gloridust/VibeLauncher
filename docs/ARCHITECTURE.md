@@ -334,14 +334,15 @@ trait Platform {
 
 ### 11.1 设计方向
 
-「Claude 的暖色调 + iOS 的结构与动效」：
+（已按实际实现更新。）照着最新 Claude 桌面版的样子做，接近 SwiftUI 的原生观感，而不是 iOS 的卡片堆叠：
 
-- **配色**：暖米白底（浅色 `#FAF9F5` 一类）、深色模式暖炭灰；强调色用珊瑚橙（接近 Claude 品牌色，但不直接用官方 Logo）；ChatGPT Profile 用中性灰绿作色标，与 Claude 区分。全部做成 CSS 变量，跟随系统浅色/深色。
-- **字体**：标题用衬线（如 Source Serif / Noto Serif SC），正文用系统字体（`-apple-system`、`Segoe UI Variable`、`Inter`/`Noto Sans SC`）。字体随应用打包，不从网络加载。
-- **结构**：iOS 设置式的分组圆角列表（inset grouped）、大标题随滚动收起、底部弹出式表单（sheet）、分段控件、开关、滑动删除（桌面上配右键菜单）。
-- **材质**：半透明毛玻璃只用在标题栏和弹层，少量使用。Linux 的 WebKitGTK 上 `backdrop-filter` 性能一般，透明窗口不可靠，所以**窗口本身不透明**，毛玻璃只在窗口内部。
-- **动效**：弹簧曲线，列表增删、sheet 弹出、启动时卡片轻微缩放。尊重系统「减少动态效果」设置。
-- **无障碍**：键盘全程可操作（↑↓ 选择、回车启动、⌘/Ctrl+N 新建、⌘/Ctrl+, 设置）；对比度达到 WCAG AA；屏幕阅读器标签齐全。
+- **布局**：左侧浅灰侧栏（248px）+ 右侧白色内容区。侧栏顶部是「新建配置」「诊断」两个导航项，下面按应用分组（Claude、ChatGPT），组标题是可折叠的小号灰字，每行是配置的图标、名字和状态点；选中行是圆角灰色胶囊。底部一行齿轮「设置」和版本号。
+- **内容区**：52px 顶栏（标题 + 右侧操作）；正文最大宽度 680px，分组的圆角细边卡片（行内是标题 / 说明 / 右侧控件），状态用小胶囊（运行中 / 未隔离 / 登录中）。
+- **配色**：暖灰（侧栏 `#f5f4f0`，深色 `#1f1e1d` / 内容 `#262624`），只有一个强调色（珊瑚 `#c96442`）用于焦点和少量提示；主按钮是深色实心。全部是 CSS 变量，跟随系统或手动切换浅色 / 深色。
+- **字体**：系统字体（`-apple-system` / `Segoe UI Variable` / `Cantarell` / `Noto Sans CJK`），不打包字体文件。
+- **动效**：弹层轻微上浮、状态点脉动；尊重「减少动态效果」。窗口不透明，不用毛玻璃（WebKitGTK 上不可靠）。
+- **键盘**：↑↓ 切换配置，Ctrl/⌘+N 新建，Ctrl/⌘+, 设置，Esc 关闭弹层，菜单可用方向键。
+- **中英文**：界面文字和诊断都按 `code` 翻译（诊断由 Rust 给出稳定的 code 和参数，前端翻译）。
 
 ### 11.2 页面
 
@@ -374,13 +375,15 @@ vibelauncher scheme claim|release|status
 
 ### 12.1 选型
 
+（已按实际实现更新。）用户要求「只是个启动器，不要太重」，所以拆成两个程序：
+
 | 部分 | 选择 | 理由 |
 |---|---|---|
-| 桌面外壳 | **Tauri 2** | 安装包几 MB（Electron 要上百 MB）；Rust 适合做进程检查、注册表、Launch Services 这类系统调用；三平台都有官方打包。本机已有 Rust 1.99、`libwebkit2gtk-4.1-dev` |
-| 核心 | Rust 库 `vl-core` | GUI 和 CLI 共用 |
-| 前端 | React + TypeScript + Vite，样式手写 CSS 变量，动效用 `motion` | 不引入大型组件库，才能做出自己的 iOS 风格 |
-| 关键 crate | `directories`、`serde`/`toml`、`sysinfo`（进程与环境变量）、`url`、`tracing`、Windows：`windows`（注册表、`.lnk`、PEB）、macOS：`objc2-*`（Launch Services） | |
-| 单实例 | `tauri-plugin-single-instance` | GUI 只开一个窗口 |
+| 启动器 | **`vibelauncher` 命令**（Rust，约 1.7 MB，无界面依赖） | 快捷方式、链接转发、doctor 都只调用它；启动一个配置约 0.1 秒、10 MB 以内的内存，不需要窗口在运行（见 12.5） |
+| 管理窗口 | **`vibelauncher-gui`，Tauri 2** | 只在打开时运行：没有托盘、关闭即退出。用系统 WebView，不带浏览器内核 |
+| 核心 | Rust 库 `vl-core` | 命令和窗口共用；窗口也直接链接 `vibelauncher` 库，所以 AppImage 里只有一个可执行文件也能当命令用 |
+| 前端 | **Preact** + TypeScript + Vite，手写 CSS，图标 `lucide-preact` | 压缩后 JS 约 30 KB（gzip），没有组件库 |
+| 单实例 | `tauri-plugin-single-instance` | 第二次打开只是把已有窗口提到前面，或把「选择配置」的请求转过去 |
 
 **不使用** `tauri-plugin-deep-link` 接管协议：它的做法是「注册成默认处理程序」，正是第 7 节说的会被 Claude 抢回并改变登录方式的做法。
 
@@ -388,33 +391,55 @@ vibelauncher scheme claim|release|status
 
 ```
 crates/
-  vl-core/         配置、定位、启动、路由、诊断（无界面依赖）
-    src/provider/{claude,chatgpt}.rs
-    src/platform/{linux,macos,windows}.rs
-  vl-cli/          vibelauncher 命令行
-app/               Tauri 应用（src-tauri 调用 vl-core）
-  src/             前端
-docs/              本文档、平台实测记录
-spikes/            各平台验证脚本（第 13 节）
+  vl-core/         配置、定位、启动、路由、快捷方式、诊断（无界面依赖）
+  vibelauncher/    命令行（同时是库，供窗口复用）
+app/
+  src/             前端（Preact）；mock.ts 只在开发时用
+  src-tauri/       管理窗口（Tauri）
+docs/              本文档
+.github/workflows/ CI 和三平台发布
 ```
 
 ### 12.3 打包发布
 
-- Linux：`.deb`、`.rpm`、AppImage（AppImage 需要把自身路径写进快捷方式，并在移动后自我修复）；也可提供 AUR。
-- macOS：通用二进制 `.dmg`，签名 + 公证（需要 Apple 开发者账号）。
-- Windows：MSI 或 NSIS，签名（没有证书时 SmartScreen 会拦）。
-- GitHub Actions 三平台矩阵构建；应用内检查 GitHub Release 更新。
+- `.github/workflows/release.yml`：推 `v*` 标签后在 GitHub Actions 上构建，产物放进草稿 Release。
+  - Linux x86_64：`.deb`、`.rpm`、AppImage（推荐 deb/rpm；AppImage 的快捷方式指向 AppImage 文件本身，移动后要在「诊断」里修复）。
+  - macOS：Apple 芯片和 Intel 各一个 `.dmg`。
+  - Windows：NSIS 安装包（按用户安装，不需要管理员权限）。
+- 命令行 `vibelauncher` 作为 Tauri sidecar（`tauri.bundle.conf.json` 的 `externalBin`）随包安装在窗口程序旁边，快捷方式和链接处理只调用它。
+- 目前**没有签名**：macOS 需要 Apple 开发者账号（签名 + 公证），Windows 没有证书时 SmartScreen 会提示。加上对应的 secrets 后再在工作流里打开。
+- 不做应用内自动更新（启动器不应该常驻、不应该联网）；新版本在 GitHub Release 发布。
 
 ### 12.4 测试
 
-- **核心单元测试**：路由算法（标记过期、多实例、只有一个实例等）、配置读写与迁移、`.desktop` 解析与改写、命令行解析。用假的进程表和假的平台实现。
-- **集成测试（Linux CI 可跑）**：用私有 `XDG_*` 目录跑完整的「生成覆盖文件 → `gio open` → 路由 → 转交」链路，以假应用代替 Claude。
-- **兼容性检查脚本**：对真实安装的 Claude / ChatGPT 自动跑一遍第 2 节的实验（数据落点、转交、协议抢回），输出报告。官方每次发新版本时手动跑，结果记进 `docs/compat.md` 并更新 `known_versions`。
-- **UI**：Playwright 跑前端（用假的 Tauri 接口），截图对比浅色/深色/中英文。
+- **核心单元测试**（`cargo test -p vl-core -p vibelauncher`，CI 在三平台跑）：路由算法（标记过期、多实例、只有一个实例等）、配置读写、`.desktop` 解析与改写、asar 版本读取、命令行解析。
+- **真实窗口**：用私有 `VIBELAUNCHER_HOME` 和 `XDG_*` 目录启动 `vibelauncher-gui`，放进限内存的 `systemd-run --user --scope`，用 `xdotool` + `import` 截图。不会碰系统里真正的链接处理程序和应用菜单。
+- **界面**：`pnpm dev` 下用假的后端（`app/src/mock.ts`，只在开发模式加载），`?scenario=busy|fresh|noapps|route`、`&lang=zh`、`&theme=dark`、`&platform=macos` 覆盖各种状态。
+- 还没做：Linux CI 上的「覆盖文件 → `gio open` → 路由 → 转交」集成测试；对官方新版本自动跑一遍第 2 节实验的兼容性脚本。
+
+### 12.5 实测体积与内存（Linux，2026-11-14）
+
+| 项目 | 数值 |
+|---|---|
+| `vibelauncher` 命令 | 1.7 MB；`list`（查找应用 + 扫描进程）约 0.10 秒、9.4 MB 内存 |
+| `vibelauncher-gui` 窗口程序 | 7.0 MB |
+| 前端 JS | 约 30 KB（gzip） |
+| 窗口打开时总内存（cgroup） | 约 105 MB |
+| 其中各进程 PSS | 窗口主进程 93 MB、WebKit 渲染进程 72 MB、WebKit 网络进程 13 MB |
+
+第一次测时窗口总内存约 330 MB（主进程 PSS 242 MB），命令 `list` 要 50 MB、0.3 秒。查出三个原因并改掉：
+
+1. **读应用版本时把整个 `app.asar` 目录解析成 JSON 树**。目录里列着应用的全部文件（Claude 约 88 MB 的 asar，目录本身就有几 MB），每次查找应用要读 8 次，而窗口每 2.5 秒刷新都会查找一次。现在只解码 `package.json` 那一项，并按「路径 + 大小 + 修改时间」缓存结果。
+2. **进程扫描把线程也当成进程**（sysinfo 默认如此），每次打开上万个 `/proc/*/task/*` 文件。现在不扫线程，而且只读应用自己的进程（和它们的直接子进程）的环境变量。
+3. **异步运行时每个 CPU 一个工作线程**（这台机器 16 个），glibc 又给每个分配内存的线程一个 arena。现在运行时只开 2 个工作线程，Linux 上用 `mallopt(M_ARENA_MAX, 2)` 限制 arena 数量。
+
+剩下的大头是 WebKitGTK 本身（渲染进程 + 网络进程约 85 MB），这是用系统 WebView 的固定成本；窗口关掉就全部释放，平时只有快捷方式调用的命令在跑，用完即退出。
 
 ---
 
 ## 13. 路线图（先做风险最高的）
+
+**进度（2026-11-14）**：阶段 1、2 在 Linux 上已完成；阶段 3 的 macOS、Windows 代码已写，待真机测试；阶段 4 的三平台打包工作流已写，还没签名。
 
 **阶段 0：各平台验证（1 周）**
 - [x] Linux 实测：隔离参数、转交、协议抢回、同名覆盖（本文第 2 节）
@@ -440,10 +465,14 @@ spikes/            各平台验证脚本（第 13 节）
 
 ---
 
-## 14. 需要你决定的事
+## 14. 已定的事和还没定的事
 
-1. **CLI 名字**：建议统一用 `vibelauncher`（原方案是 `fenshen`）。可以再装一个短别名。
-2. **ChatGPT 的优先级**：是和 Claude 一起做，还是 Claude 先做完再加？它的登录回调方式还没查清。
-3. **Linux 回调接管默认开还是关**：同名覆盖会让应用菜单里的「Claude」图标先经过启动器（打开的仍是默认 Profile）。我建议首次运行时询问，默认开。
-4. **macOS / Windows 签名**：需要 Apple 开发者账号和 Windows 代码签名证书，否则用户会看到系统安全警告。
-5. **托盘模式**是否进第一版。
+已定：
+1. **命令名**：`vibelauncher`。
+2. **ChatGPT**：和 Claude 一起支持（`CODEX_ELECTRON_USER_DATA_PATH` + `CODEX_HOME` 隔离，`codex://` 走同一套路由）；在 Linux 上做过简单测试。
+3. **Linux 链接接管**：只在某个应用有两个以上配置时才接管，可以在设置里关掉，关掉时原样交还。
+4. **托盘**：不做。窗口不常驻，这是「轻」的前提。
+
+还要你决定：
+1. **macOS / Windows 签名**：需要 Apple 开发者账号和 Windows 代码签名证书，否则用户第一次打开会看到系统安全警告。
+2. **macOS、Windows 真机测试**：代码已实现但没在真机上跑过，第 13 节阶段 0 里 macOS / Windows 的几项还待验证。

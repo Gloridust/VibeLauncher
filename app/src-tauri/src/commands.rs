@@ -25,6 +25,7 @@ pub struct AppState {
     app_icons: Mutex<HashMap<String, Option<String>>>,
     /// A link waiting for the user to pick a profile (`--choose-route`).
     route: Mutex<Option<String>>,
+    opened_for_route: bool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -376,6 +377,29 @@ pub async fn reveal(path: String) -> Res<()> {
     r.map(|_| ()).map_err(|err| err.to_string())
 }
 
+/// Open the project's web page (fixed addresses only).
+#[tauri::command]
+pub async fn open_website(page: String) -> Res<()> {
+    let url = match page.as_str() {
+        "issues" => "https://github.com/Gloridust/VibeLauncher/issues",
+        "releases" => "https://github.com/Gloridust/VibeLauncher/releases",
+        _ => "https://github.com/Gloridust/VibeLauncher",
+    };
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(windows)]
+    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    r.map(|_| ()).map_err(|err| err.to_string())
+}
+
+/// Whether the window was opened only to choose a profile for a link.
+#[tauri::command]
+pub fn opened_for_route(st: State<'_, AppState>) -> bool {
+    st.opened_for_route
+}
+
 fn route_arg(args: &[String]) -> Option<String> {
     let i = args.iter().position(|a| a == "--choose-route")?;
     args.get(i + 1).cloned()
@@ -395,7 +419,14 @@ pub fn run(args: Vec<String>) {
         icons: Mutex::new(HashMap::new()),
         app_icons: Mutex::new(HashMap::new()),
         route: Mutex::new(route_arg(&args)),
+        opened_for_route: route_arg(&args).is_some(),
     };
+    // A small window needs a small runtime: the default spins up a worker per
+    // CPU, and each one ends up with its own malloc arena.
+    if let Ok(rt) = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+        tauri::async_runtime::set(rt.handle().clone());
+        std::mem::forget(rt);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(url) = route_arg(&argv) {
@@ -442,6 +473,8 @@ pub fn run(args: Vec<String>) {
             take_route,
             deliver_choice,
             reveal,
+            open_website,
+            opened_for_route,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VibeLauncher");

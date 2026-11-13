@@ -14,6 +14,12 @@ fn main() -> std::process::ExitCode {
     if args.first().is_some_and(|a| vibelauncher::is_command(a)) {
         return vibelauncher::main_with(args);
     }
+    // glibc gives every thread that allocates its own arena (up to 8 per
+    // CPU); WebKit and GTK start many threads, so cap it before they exist.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
     commands::run(args);
     std::process::ExitCode::SUCCESS
 }

@@ -5,7 +5,7 @@
 //! only used by `doctor`, to spot instances that lost their isolation after an
 //! update relaunch.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -43,11 +43,41 @@ impl Snapshot {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
+            // Threads are listed as processes by default; we only want processes.
             ProcessRefreshKind::nothing()
+                .without_tasks()
                 .with_cmd(UpdateKind::Always)
-                .with_exe(UpdateKind::Always)
-                .with_environ(UpdateKind::Always),
+                .with_exe(UpdateKind::Always),
         );
+        // Environments are big; read them only for the apps' own processes
+        // and their direct children (the fallback below needs those).
+        let mains: HashSet<sysinfo::Pid> = sys
+            .processes()
+            .iter()
+            .filter(|(_, p)| p.thread_kind().is_none())
+            .filter(|(_, p)| {
+                let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+                classify(p.exe(), &normalize_cmd(cmd), installs).is_some()
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+        let wanted: Vec<sysinfo::Pid> = sys
+            .processes()
+            .iter()
+            .filter(|(pid, p)| {
+                mains.contains(pid)
+                    || p.parent().is_some_and(|pp| mains.contains(&pp))
+                    || p.cmd().iter().any(|a| a.to_string_lossy().contains("Crashpad"))
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+        if !wanted.is_empty() {
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&wanted),
+                false,
+                ProcessRefreshKind::nothing().without_tasks().with_environ(UpdateKind::Always),
+            );
+        }
         // Every process once, with a normalized command line.
         struct Info {
             parent: Option<u32>,

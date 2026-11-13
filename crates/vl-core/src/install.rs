@@ -108,8 +108,49 @@ impl AppInstall {
 
 /// Read `version` from the app's own `package.json` inside `app.asar`.
 /// Works the same on every platform and needs no package manager.
+///
+/// The archive's index lists every file in the app (megabytes of JSON), so
+/// only the one entry is decoded, and the answer is kept for as long as the
+/// file is unchanged — the window asks on every refresh.
 pub fn asar_package_version(asar: &Path) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Key = (std::path::PathBuf, u64, Option<std::time::SystemTime>);
+    static CACHE: OnceLock<Mutex<HashMap<Key, Option<String>>>> = OnceLock::new();
+    let meta = std::fs::metadata(asar).ok()?;
+    let key: Key = (asar.to_path_buf(), meta.len(), meta.modified().ok());
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(v) = cache.lock().ok()?.get(&key) {
+        return v.clone();
+    }
+    let v = read_asar_package_version(asar);
+    if let Ok(mut c) = cache.lock() {
+        c.retain(|k, _| k.0 != key.0);
+        c.insert(key, v.clone());
+    }
+    v
+}
+
+fn read_asar_package_version(asar: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
+    #[derive(serde::Deserialize)]
+    struct Header {
+        files: Files,
+    }
+    #[derive(serde::Deserialize)]
+    struct Files {
+        #[serde(rename = "package.json")]
+        package: Entry,
+    }
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        size: u64,
+        offset: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Package {
+        version: String,
+    }
     let mut f = std::fs::File::open(asar).ok()?;
     let mut head = [0u8; 16];
     f.read_exact(&mut head).ok()?;
@@ -121,18 +162,18 @@ pub fn asar_package_version(asar: &Path) -> Option<String> {
     }
     let mut json = vec![0u8; json_len as usize];
     f.read_exact(&mut json).ok()?;
-    let header: serde_json::Value = serde_json::from_slice(&json).ok()?;
-    let entry = header.get("files")?.get("package.json")?;
-    let size = entry.get("size")?.as_u64()?;
-    let offset: u64 = entry.get("offset")?.as_str()?.parse().ok()?;
+    let header: Header = serde_json::from_slice(&json).ok()?;
+    drop(json);
+    let Entry { size, offset } = header.files.package;
+    let offset: u64 = offset.parse().ok()?;
     if size > 4 << 20 {
         return None;
     }
     f.seek(SeekFrom::Start(8 + header_size + offset)).ok()?;
     let mut pkg = vec![0u8; size as usize];
     f.read_exact(&mut pkg).ok()?;
-    let pkg: serde_json::Value = serde_json::from_slice(&pkg).ok()?;
-    pkg.get("version")?.as_str().map(str::to_string)
+    let pkg: Package = serde_json::from_slice(&pkg).ok()?;
+    Some(pkg.version)
 }
 
 /// All installs found for `provider`, best first. `override_path` (chosen by

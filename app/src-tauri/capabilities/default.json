@@ -9,6 +9,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-theme",
     "core:window:allow-start-dragging",
+    "core:window:allow-close",
     "dialog:allow-open"
   ]
 }

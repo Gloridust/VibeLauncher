@@ -30,3 +30,6 @@ app/dist/
 .DS_Store
 app/src-tauri/gen/
 app/src-tauri/binaries/
+
+# Local editor/agent config
+.claude/

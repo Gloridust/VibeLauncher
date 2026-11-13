@@ -6,9 +6,19 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  # Build the packages (without publishing) when the packaging itself changes.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - app/src-tauri/tauri.conf.json
+      - app/src-tauri/tauri.bundle.conf.json
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -22,11 +32,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bundles: deb,rpm,appimage
           - name: macOS Apple silicon
-            os: macos-14
+            os: macos-latest
             target: aarch64-apple-darwin
             bundles: app,dmg
+          # Cross-compiled on Apple silicon; Intel runners are being retired.
           - name: macOS Intel
-            os: macos-13
+            os: macos-latest
             target: x86_64-apple-darwin
             bundles: app,dmg
           - name: Windows x86_64

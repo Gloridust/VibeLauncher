@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-14, windows-latest]
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev xdg-utils desktop-file-utils libglib2.0-bin
       # The window embeds the built frontend; an empty one is enough to compile.
       - name: Placeholder frontend
         shell: bash
@@ -34,6 +34,14 @@ jobs:
         run: cargo test -p vl-core -p vibelauncher
       - name: Check window
         run: cargo check -p vibelauncher-gui
+      # Drives the real command on this OS against a stand-in app: launching
+      # with an isolated data folder, process detection, the "lost settings"
+      # diagnosis and fix, sign-in routing, taking over the claude:// handler
+      # (and the OS delivering a link through it), shortcuts, deletion.
+      - name: End-to-end on this OS
+        env:
+          VL_SMOKE: ci
+        run: cargo test -p vibelauncher --features smoke-test --test smoke -- --nocapture
 
   frontend:
     name: Frontend

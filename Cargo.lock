@@ -4392,6 +4392,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde_json",
+ "tempfile",
  "url",
  "vl-core",
  "windows-sys 0.60.2",

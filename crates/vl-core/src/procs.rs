@@ -271,6 +271,32 @@ fn same(a: &Path, b: &Path) -> bool {
 
 /// Ask a process to quit (SIGTERM / WM_CLOSE-equivalent).
 pub fn terminate(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        // Windows has no SIGTERM. `taskkill` without /F asks the app's
+        // windows to close, as clicking their close buttons would; force it
+        // only if it is still running a few seconds later.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let spid = sysinfo::Pid::from_u32(pid);
+        let mut sys = System::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            sys.refresh_processes(ProcessesToUpdate::Some(&[spid]), true);
+            match sys.process(spid) {
+                None => return true,
+                Some(p) if std::time::Instant::now() >= deadline => return p.kill(),
+                Some(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+            }
+        }
+    }
+    #[allow(unreachable_code)]
     let mut sys = System::new();
     let pid = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);

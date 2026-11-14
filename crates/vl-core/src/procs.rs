@@ -56,7 +56,11 @@ impl Snapshot {
             .iter()
             .filter(|(_, p)| p.thread_kind().is_none())
             .filter(|(_, p)| {
-                let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+                let cmd: Vec<String> = p
+                    .cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .collect();
                 classify(p.exe(), &normalize_cmd(cmd), installs).is_some()
             })
             .map(|(pid, _)| *pid)
@@ -67,7 +71,9 @@ impl Snapshot {
             .filter(|(pid, p)| {
                 mains.contains(pid)
                     || p.parent().is_some_and(|pp| mains.contains(&pp))
-                    || p.cmd().iter().any(|a| a.to_string_lossy().contains("Crashpad"))
+                    || p.cmd()
+                        .iter()
+                        .any(|a| a.to_string_lossy().contains("Crashpad"))
             })
             .map(|(pid, _)| *pid)
             .collect();
@@ -75,7 +81,9 @@ impl Snapshot {
             sys.refresh_processes_specifics(
                 ProcessesToUpdate::Some(&wanted),
                 false,
-                ProcessRefreshKind::nothing().without_tasks().with_environ(UpdateKind::Always),
+                ProcessRefreshKind::nothing()
+                    .without_tasks()
+                    .with_environ(UpdateKind::Always),
             );
         }
         // Every process once, with a normalized command line.
@@ -93,7 +101,12 @@ impl Snapshot {
                 pid.as_u32(),
                 Info {
                     parent: p.parent().map(|x| x.as_u32()),
-                    cmd: normalize_cmd(p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect()),
+                    cmd: normalize_cmd(
+                        p.cmd()
+                            .iter()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .collect(),
+                    ),
                     env: parse_environ(p.environ()),
                 },
             );
@@ -106,15 +119,22 @@ impl Snapshot {
             if p.thread_kind().is_some() {
                 continue;
             }
-            let Some(info) = all.get(&pid.as_u32()) else { continue };
+            let Some(info) = all.get(&pid.as_u32()) else {
+                continue;
+            };
             if info.cmd.iter().any(|a| a.starts_with("--type=")) {
                 continue; // Chromium helper (renderer, GPU, zygote, …)
             }
             let exe = p.exe().map(Path::to_path_buf);
-            let Some(provider) = classify(exe.as_deref(), &info.cmd, installs) else { continue };
+            let Some(provider) = classify(exe.as_deref(), &info.cmd, installs) else {
+                continue;
+            };
             // A helper re-executing the main binary without --type= (rare)
             // has a parent of the same app; skip it.
-            if let Some(parent) = info.parent.and_then(|pp| sys.process(sysinfo::Pid::from_u32(pp))) {
+            if let Some(parent) = info
+                .parent
+                .and_then(|pp| sys.process(sysinfo::Pid::from_u32(pp)))
+            {
                 if parent.exe().is_some() && parent.exe() == p.exe() {
                     continue;
                 }
@@ -136,11 +156,15 @@ impl Snapshot {
             // (crashpad handler, Code-tab helpers, …).
             let my = pid.as_u32();
             let environ = info.env.clone().or_else(|| {
-                let crash_dir = udd.as_ref().map(|d| d.join("Crashpad").to_string_lossy().into_owned());
+                let crash_dir = udd
+                    .as_ref()
+                    .map(|d| d.join("Crashpad").to_string_lossy().into_owned());
                 all.iter()
                     .filter(|(_, i)| {
                         i.parent == Some(my)
-                            || crash_dir.as_ref().is_some_and(|c| i.cmd.iter().any(|a| a.contains(c.as_str())))
+                            || crash_dir
+                                .as_ref()
+                                .is_some_and(|c| i.cmd.iter().any(|a| a.contains(c.as_str())))
                     })
                     .find_map(|(_, i)| i.env.clone())
             });
@@ -159,11 +183,16 @@ impl Snapshot {
     }
 
     pub fn for_profile(&self, id: &str) -> Vec<&RunningApp> {
-        self.apps.iter().filter(|a| a.profile_id.as_deref() == Some(id)).collect()
+        self.apps
+            .iter()
+            .filter(|a| a.profile_id.as_deref() == Some(id))
+            .collect()
     }
 
     pub fn is_running(&self, id: &str) -> bool {
-        self.apps.iter().any(|a| a.profile_id.as_deref() == Some(id))
+        self.apps
+            .iter()
+            .any(|a| a.profile_id.as_deref() == Some(id))
     }
 
     pub fn running_ids(&self, provider: ProviderKind) -> Vec<String> {
@@ -182,18 +211,29 @@ impl Snapshot {
 /// process that looks like one of the apps, and why it was (not) counted.
 fn debug_dump(sys: &System, installs: &[AppInstall]) {
     for i in installs {
-        eprintln!("install {:?}: program {:?}, matches {:?}", i.provider, i.program, i.match_exes);
+        eprintln!(
+            "install {:?}: program {:?}, matches {:?}",
+            i.provider, i.program, i.match_exes
+        );
     }
     let names: Vec<String> = ProviderKind::ALL
         .iter()
-        .flat_map(|p| p.process_names().iter().map(|n| n.trim_end_matches(".exe").to_string()))
+        .flat_map(|p| {
+            p.process_names()
+                .iter()
+                .map(|n| n.trim_end_matches(".exe").to_string())
+        })
         .collect();
     for (pid, p) in sys.processes() {
         let name = p.name().to_string_lossy().to_lowercase();
         if !names.iter().any(|n| name.contains(n.as_str())) {
             continue;
         }
-        let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let cmd: Vec<String> = p
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         let canon = p.exe().map(|e| e.canonicalize());
         eprintln!(
             "pid {pid} name {name:?} parent {:?} thread {:?}\n  exe {:?} canonical {canon:?}\n  cmd {cmd:?}\n  class {:?} environ {}",
@@ -207,7 +247,9 @@ fn debug_dump(sys: &System, installs: &[AppInstall]) {
 }
 
 fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Option<ProviderKind> {
-    let exe_c = exe.and_then(|e| e.canonicalize().ok()).or_else(|| exe.map(Path::to_path_buf));
+    let exe_c = exe
+        .and_then(|e| e.canonicalize().ok())
+        .or_else(|| exe.map(Path::to_path_buf));
     for i in installs {
         if let Some(e) = &exe_c {
             if i.match_exes.iter().any(|m| same(m, e)) {
@@ -220,7 +262,14 @@ fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Opti
     let name = exe
         .and_then(|e| e.file_name())
         .map(|n| n.to_string_lossy().to_lowercase())
-        .or_else(|| cmd.first().map(|c| Path::new(c).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()))?;
+        .or_else(|| {
+            cmd.first().map(|c| {
+                Path::new(c)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase())
+                    .unwrap_or_default()
+            })
+        })?;
     // `claude` alone is the Claude Code CLI on Linux; require the desktop name there.
     for p in ProviderKind::ALL {
         let names = p.process_names();
@@ -260,9 +309,13 @@ pub fn normalize_cmd(cmd: Vec<String>) -> Vec<String> {
 /// Chromium sets its process title it overwrites the start of its own
 /// environment block, so the first entry must be a real variable.
 fn parse_environ(env: &[std::ffi::OsString]) -> Option<HashMap<String, String>> {
-    let valid_key = |k: &str| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let valid_key =
+        |k: &str| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     // Windows starts the block with hidden per-drive entries (`=C:=C:\…`).
-    let first = env.iter().find(|kv| !kv.to_string_lossy().starts_with('='))?.to_string_lossy();
+    let first = env
+        .iter()
+        .find(|kv| !kv.to_string_lossy().starts_with('='))?
+        .to_string_lossy();
     if !first.split_once('=').is_some_and(|(k, _)| valid_key(k)) {
         return None;
     }
@@ -275,7 +328,9 @@ fn parse_environ(env: &[std::ffi::OsString]) -> Option<HashMap<String, String>> 
         })
         .collect();
     // Windows spells it `Path`.
-    m.keys().any(|k| k.eq_ignore_ascii_case("PATH") || k == "HOME").then_some(m)
+    m.keys()
+        .any(|k| k.eq_ignore_ascii_case("PATH") || k == "HOME")
+        .then_some(m)
 }
 
 /// The value of `--user-data-dir` (either `--user-data-dir=X` or `--user-data-dir X`).
@@ -334,7 +389,9 @@ pub fn terminate(pid: u32) -> bool {
     let pid = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     match sys.process(pid) {
-        Some(p) => p.kill_with(sysinfo::Signal::Term).unwrap_or_else(|| p.kill()),
+        Some(p) => p
+            .kill_with(sysinfo::Signal::Term)
+            .unwrap_or_else(|| p.kill()),
         None => false,
     }
 }
@@ -345,24 +402,44 @@ mod tests {
 
     #[test]
     fn windows_environment_block() {
-        let env: Vec<std::ffi::OsString> = ["=C:=C:\\work", "=ExitCode=00000000", "ALLUSERSPROFILE=C:\\ProgramData", "Path=C:\\Windows", "CLAUDE_CONFIG_DIR=C:\\p\\claude-config"]
+        let env: Vec<std::ffi::OsString> = [
+            "=C:=C:\\work",
+            "=ExitCode=00000000",
+            "ALLUSERSPROFILE=C:\\ProgramData",
+            "Path=C:\\Windows",
+            "CLAUDE_CONFIG_DIR=C:\\p\\claude-config",
+        ]
+        .iter()
+        .map(Into::into)
+        .collect();
+        let m = parse_environ(&env).expect("a Windows block is readable");
+        assert_eq!(
+            m.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("C:\\p\\claude-config")
+        );
+        // A block whose start was overwritten (Chromium's process title) still isn't.
+        let bad: Vec<std::ffi::OsString> = ["claude --type=renderer", "PATH=/usr/bin"]
             .iter()
             .map(Into::into)
             .collect();
-        let m = parse_environ(&env).expect("a Windows block is readable");
-        assert_eq!(m.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("C:\\p\\claude-config"));
-        // A block whose start was overwritten (Chromium's process title) still isn't.
-        let bad: Vec<std::ffi::OsString> = ["claude --type=renderer", "PATH=/usr/bin"].iter().map(Into::into).collect();
         assert!(parse_environ(&bad).is_none());
     }
 
     #[test]
     fn udd_forms() {
         let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert_eq!(user_data_dir_arg(&v(&["x", "--user-data-dir=/a b"])), Some("/a b".into()));
-        assert_eq!(user_data_dir_arg(&v(&["x", "--user-data-dir", "/c"])), Some("/c".into()));
+        assert_eq!(
+            user_data_dir_arg(&v(&["x", "--user-data-dir=/a b"])),
+            Some("/a b".into())
+        );
+        assert_eq!(
+            user_data_dir_arg(&v(&["x", "--user-data-dir", "/c"])),
+            Some("/c".into())
+        );
         assert_eq!(user_data_dir_arg(&v(&["x"])), None);
-        let joined = normalize_cmd(v(&["/opt/My App/claude --user-data-dir=/a b/electron --type=gpu claude://x"]));
+        let joined = normalize_cmd(v(&[
+            "/opt/My App/claude --user-data-dir=/a b/electron --type=gpu claude://x",
+        ]));
         assert_eq!(joined[0], "/opt/My App/claude");
         assert_eq!(user_data_dir_arg(&joined), Some("/a b/electron".into()));
         assert!(joined.iter().any(|a| a.starts_with("--type=")));

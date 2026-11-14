@@ -17,6 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -39,6 +40,7 @@ jobs:
       # diagnosis and fix, sign-in routing, taking over the claude:// handler
       # (and the OS delivering a link through it), shortcuts, deletion.
       - name: End-to-end on this OS
+        timeout-minutes: 10
         env:
           VL_SMOKE: ci
         run: cargo test -p vibelauncher --features smoke-test --test smoke -- --nocapture

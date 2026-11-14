@@ -13,7 +13,9 @@ pub struct DesktopEntry {
 
 impl DesktopEntry {
     pub fn parse(text: &str) -> Self {
-        Self { lines: text.lines().map(str::to_string).collect() }
+        Self {
+            lines: text.lines().map(str::to_string).collect(),
+        }
     }
 
     pub fn to_text(&self) -> String {
@@ -89,7 +91,11 @@ impl DesktopEntry {
         }
         if cur == group || self.groups().iter().any(|g| g == group) {
             let at = group_end.map(|i| i + 1).unwrap_or_else(|| {
-                self.lines.iter().position(|l| l.trim() == format!("[{group}]")).map(|i| i + 1).unwrap_or(self.lines.len())
+                self.lines
+                    .iter()
+                    .position(|l| l.trim() == format!("[{group}]"))
+                    .map(|i| i + 1)
+                    .unwrap_or(self.lines.len())
             });
             self.lines.insert(at, format!("{key}={value}"));
         } else {
@@ -152,7 +158,10 @@ pub fn unescape_string(v: &str) -> String {
 }
 
 pub fn escape_string(v: &str) -> String {
-    v.replace('\\', "\\\\").replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r")
+    v.replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
 }
 
 /// Split an (already string-unescaped) Exec value into arguments.
@@ -200,7 +209,8 @@ pub fn split_exec(v: &str) -> Vec<String> {
 /// Quote one argument for an Exec line (before string-level escaping).
 pub fn quote_exec_arg(a: &str) -> String {
     const RESERVED: &[char] = &[
-        ' ', '\t', '\n', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(', ')', '`',
+        ' ', '\t', '\n', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(',
+        ')', '`',
     ];
     if !a.is_empty() && !a.contains(RESERVED) {
         return a.to_string();
@@ -221,7 +231,13 @@ pub fn quote_exec_arg(a: &str) -> String {
 pub fn build_exec(args: &[String]) -> String {
     let joined = args
         .iter()
-        .map(|a| if is_field_code(a) { a.clone() } else { quote_exec_arg(a) })
+        .map(|a| {
+            if is_field_code(a) {
+                a.clone()
+            } else {
+                quote_exec_arg(a)
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ");
     escape_string(&joined)
@@ -280,13 +296,17 @@ pub fn find_by_id(id: &str) -> Vec<PathBuf> {
 pub fn system_handlers_of(mime: &str) -> Vec<(String, PathBuf)> {
     let mut out = Vec::new();
     for d in xdg_data_dirs().into_iter().skip(1) {
-        let Ok(rd) = std::fs::read_dir(d.join("applications")) else { continue };
+        let Ok(rd) = std::fs::read_dir(d.join("applications")) else {
+            continue;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) != Some("desktop") {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            let Ok(text) = std::fs::read_to_string(&p) else {
+                continue;
+            };
             let de = DesktopEntry::parse(&text);
             if de.handles_mime(mime) && de.main("X-VibeLauncher").is_none() {
                 let id = p.file_name().unwrap().to_string_lossy().into_owned();
@@ -300,7 +320,9 @@ pub fn system_handlers_of(mime: &str) -> Vec<(String, PathBuf)> {
 }
 
 pub fn read(path: &Path) -> Option<DesktopEntry> {
-    std::fs::read_to_string(path).ok().map(|t| DesktopEntry::parse(&t))
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|t| DesktopEntry::parse(&t))
 }
 
 #[cfg(test)]
@@ -314,10 +336,16 @@ mod tests {
         let d = DesktopEntry::parse(CLAUDE);
         assert_eq!(d.main("Name").as_deref(), Some("Claude"));
         assert!(d.handles_mime("x-scheme-handler/claude"));
-        assert_eq!(d.exec_args("Desktop Entry").unwrap(), vec!["claude-desktop", "%U"]);
+        assert_eq!(
+            d.exec_args("Desktop Entry").unwrap(),
+            vec!["claude-desktop", "%U"]
+        );
         assert_eq!(
             d.exec_args("Desktop Action NewChat").unwrap(),
-            vec!["claude-desktop", "claude://claude.ai/new?surface=chat&source=desktop_action"]
+            vec![
+                "claude-desktop",
+                "claude://claude.ai/new?surface=chat&source=desktop_action"
+            ]
         );
     }
 
@@ -343,7 +371,10 @@ mod tests {
         assert_eq!(d.main("X-VibeLauncher").as_deref(), Some("true"));
         assert!(d.main("Icon").is_none());
         // Action group untouched and still after the main group.
-        assert!(d.get("Desktop Action NewChat", "Exec").unwrap().contains("claude://"));
+        assert!(d
+            .get("Desktop Action NewChat", "Exec")
+            .unwrap()
+            .contains("claude://"));
         let t = d.to_text();
         assert!(t.find("X-VibeLauncher").unwrap() < t.find("[Desktop Action NewChat]").unwrap());
     }

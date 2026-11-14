@@ -10,7 +10,10 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use vl_core::{doctor, icon, router, scheme, shortcuts, AppInstall, Decision, Launcher, Profile, ProfileInput, ProviderKind, Settings};
+use vl_core::{
+    doctor, icon, router, scheme, shortcuts, AppInstall, Decision, Launcher, Profile, ProfileInput,
+    ProviderKind, Settings,
+};
 
 type Res<T> = Result<T, String>;
 
@@ -108,7 +111,13 @@ fn platform() -> &'static str {
 
 impl AppState {
     fn profile_icon(&self, inst: Option<&AppInstall>, p: &Profile) -> Option<String> {
-        let key = format!("{}|{}|{}|{:?}", p.id, p.color, p.isolated, inst.and_then(|i| i.icon.as_ref()));
+        let key = format!(
+            "{}|{}|{}|{:?}",
+            p.id,
+            p.color,
+            p.isolated,
+            inst.and_then(|i| i.icon.as_ref())
+        );
         if let Some(v) = lock(&self.icons).get(&key) {
             return Some(v.clone());
         }
@@ -139,7 +148,9 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
             installs.insert(provider, inst.clone());
             let pending = l.pending_login(provider).map(|p| PendingView {
                 profile: p.profile,
-                seconds_left: (router::PENDING_TTL_SECS - (chrono_now() - p.created_at.timestamp())).max(0),
+                seconds_left: (router::PENDING_TTL_SECS
+                    - (chrono_now() - p.created_at.timestamp()))
+                .max(0),
             });
             apps.push(AppView {
                 provider,
@@ -150,7 +161,11 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
                 routing_wanted: l.routing_wanted(provider),
                 install: inst,
                 pending,
-                unknown_running: snap.apps.iter().filter(|a| a.provider == provider && a.profile_id.is_none()).count(),
+                unknown_running: snap
+                    .apps
+                    .iter()
+                    .filter(|a| a.provider == provider && a.profile_id.is_none())
+                    .count(),
             });
         }
         let profiles = l
@@ -163,13 +178,19 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
                 let expected = p.provider.isolation_env(&root);
                 let lost = p.isolated
                     && running.iter().any(|a| {
-                        a.environ
-                            .as_ref()
-                            .is_some_and(|env| expected.iter().any(|(k, v)| env.get(k).map(String::as_str) != Some(v.as_str())))
+                        a.environ.as_ref().is_some_and(|env| {
+                            expected
+                                .iter()
+                                .any(|(k, v)| env.get(k).map(String::as_str) != Some(v.as_str()))
+                        })
                     });
                 let inst = installs.get(&p.provider).cloned().flatten();
                 ProfileView {
-                    data_dir: if p.isolated { root.display().to_string() } else { String::new() },
+                    data_dir: if p.isolated {
+                        root.display().to_string()
+                    } else {
+                        String::new()
+                    },
                     running: !running.is_empty(),
                     lost_isolation: lost,
                     shortcut_state: shortcuts::state(p),
@@ -193,7 +214,10 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
 }
 
 fn chrono_now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 // ── profiles ──
@@ -224,7 +248,11 @@ pub async fn open_link(st: State<'_, AppState>, id: String, url: String) -> Res<
     st.with(|l| {
         let url = url.trim();
         let parsed = url::Url::parse(url).map_err(|_| anyhow::anyhow!("That isn't a link."))?;
-        let p = l.config.find(&id).cloned().ok_or_else(|| anyhow::anyhow!("no such profile"))?;
+        let p = l
+            .config
+            .find(&id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no such profile"))?;
         if !p.provider.schemes().contains(&parsed.scheme()) {
             anyhow::bail!(
                 "That isn't a {} link. It should start with {}://",
@@ -232,7 +260,11 @@ pub async fn open_link(st: State<'_, AppState>, id: String, url: String) -> Res<
                 p.provider.schemes()[0]
             );
         }
-        router::PendingStore::new(&l.paths).log(&format!("{} → {} (pasted)", router::redact(url), p.id));
+        router::PendingStore::new(&l.paths).log(&format!(
+            "{} → {} (pasted)",
+            router::redact(url),
+            p.id
+        ));
         l.deliver(&p.id, url, true)
     })
 }
@@ -243,7 +275,11 @@ pub async fn create_profile(st: State<'_, AppState>, input: ProfileInput) -> Res
 }
 
 #[tauri::command]
-pub async fn update_profile(st: State<'_, AppState>, id: String, input: ProfileInput) -> Res<Profile> {
+pub async fn update_profile(
+    st: State<'_, AppState>,
+    id: String,
+    input: ProfileInput,
+) -> Res<Profile> {
     st.with(|l| l.update_profile(&id, input))
 }
 
@@ -260,10 +296,17 @@ pub async fn reorder(st: State<'_, AppState>, ids: Vec<String>) -> Res<()> {
 /// Size of a profile's data folder; walked without holding the lock.
 #[tauri::command]
 pub async fn data_size(st: State<'_, AppState>, id: String) -> Res<Option<u64>> {
-    let root = st.with(|l| Ok(l.config.find(&id).filter(|p| p.isolated).map(|p| p.data_root(&l.paths))))?;
-    Ok(tauri::async_runtime::spawn_blocking(move || root.map(|r| vl_core::dir_size(&r, 0)))
-        .await
-        .unwrap_or(None))
+    let root = st.with(|l| {
+        Ok(l.config
+            .find(&id)
+            .filter(|p| p.isolated)
+            .map(|p| p.data_root(&l.paths)))
+    })?;
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || root.map(|r| vl_core::dir_size(&r, 0)))
+            .await
+            .unwrap_or(None),
+    )
 }
 
 // ── settings & apps ──
@@ -274,12 +317,19 @@ pub async fn set_settings(st: State<'_, AppState>, settings: Settings) -> Res<Ve
 }
 
 #[tauri::command]
-pub async fn app_candidates(st: State<'_, AppState>, provider: ProviderKind) -> Res<Vec<AppInstall>> {
+pub async fn app_candidates(
+    st: State<'_, AppState>,
+    provider: ProviderKind,
+) -> Res<Vec<AppInstall>> {
     st.with(|l| Ok(l.candidates(provider)))
 }
 
 #[tauri::command]
-pub async fn set_app(st: State<'_, AppState>, provider: ProviderKind, path: Option<PathBuf>) -> Res<()> {
+pub async fn set_app(
+    st: State<'_, AppState>,
+    provider: ProviderKind,
+    path: Option<PathBuf>,
+) -> Res<()> {
     st.with(|l| {
         l.set_app_override(provider, path)?;
         // The icon and routing follow the chosen app.
@@ -310,7 +360,9 @@ pub async fn run_doctor(st: State<'_, AppState>) -> Res<Vec<doctor::Check>> {
 pub async fn apply_fix(app: AppHandle, st: State<'_, AppState>, fix: doctor::Fix) -> Res<bool> {
     if let doctor::Fix::Restart { .. } = &fix {
         std::thread::spawn(move || {
-            let res = Launcher::open().and_then(|mut l| doctor::apply(&mut l, &fix)).map_err(e);
+            let res = Launcher::open()
+                .and_then(|mut l| doctor::apply(&mut l, &fix))
+                .map_err(e);
             let _ = app.emit("fix-done", res.err());
         });
         return Ok(true);
@@ -337,19 +389,28 @@ pub struct RouteRequest {
 
 fn route_request(l: &mut Launcher, url: &str) -> anyhow::Result<RouteRequest> {
     let parsed = url::Url::parse(url)?;
-    let provider = ProviderKind::from_scheme(parsed.scheme()).ok_or_else(|| anyhow::anyhow!("not a supported link"))?;
+    let provider = ProviderKind::from_scheme(parsed.scheme())
+        .ok_or_else(|| anyhow::anyhow!("not a supported link"))?;
     let res = l.decide_route(provider, &parsed);
     let candidates = match res.decision {
         Decision::Ask { candidates } => candidates,
         Decision::To { profile, .. } => vec![profile],
     };
-    Ok(RouteRequest { url: url.to_string(), redacted: res.redacted, provider, is_login: res.is_login, candidates })
+    Ok(RouteRequest {
+        url: url.to_string(),
+        redacted: res.redacted,
+        provider,
+        is_login: res.is_login,
+        candidates,
+    })
 }
 
 /// The link the window was opened for, if any (taken once).
 #[tauri::command]
 pub async fn take_route(st: State<'_, AppState>) -> Res<Option<RouteRequest>> {
-    let Some(url) = lock(&st.route).take() else { return Ok(None) };
+    let Some(url) = lock(&st.route).take() else {
+        return Ok(None);
+    };
     st.with(|l| route_request(l, &url)).map(Some)
 }
 
@@ -364,14 +425,27 @@ pub async fn deliver_choice(st: State<'_, AppState>, id: String, url: String) ->
 #[tauri::command]
 pub async fn reveal(path: String) -> Res<()> {
     let p = PathBuf::from(&path);
-    let target = if p.exists() { p } else { p.parent().map(PathBuf::from).unwrap_or(p) };
+    let target = if p.exists() {
+        p
+    } else {
+        p.parent().map(PathBuf::from).unwrap_or(p)
+    };
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg("-R").arg(&target).spawn();
+    let r = std::process::Command::new("open")
+        .arg("-R")
+        .arg(&target)
+        .spawn();
     #[cfg(windows)]
-    let r = std::process::Command::new("explorer").arg(format!("/select,{}", target.display())).spawn();
+    let r = std::process::Command::new("explorer")
+        .arg(format!("/select,{}", target.display()))
+        .spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
     let r = {
-        let dir = if target.is_dir() { target.clone() } else { target.parent().map(PathBuf::from).unwrap_or(target.clone()) };
+        let dir = if target.is_dir() {
+            target.clone()
+        } else {
+            target.parent().map(PathBuf::from).unwrap_or(target.clone())
+        };
         std::process::Command::new("xdg-open").arg(dir).spawn()
     };
     r.map(|_| ()).map_err(|err| err.to_string())
@@ -388,7 +462,9 @@ pub async fn open_website(page: String) -> Res<()> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(url).spawn();
     #[cfg(windows)]
-    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    let r = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
     let r = std::process::Command::new("xdg-open").arg(url).spawn();
     r.map(|_| ()).map_err(|err| err.to_string())
@@ -423,7 +499,11 @@ pub fn run(args: Vec<String>) {
     };
     // A small window needs a small runtime: the default spins up a worker per
     // CPU, and each one ends up with its own malloc arena.
-    if let Ok(rt) = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+    if let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
         tauri::async_runtime::set(rt.handle().clone());
         std::mem::forget(rt);
     }

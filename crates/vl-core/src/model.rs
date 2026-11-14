@@ -52,7 +52,9 @@ fn yes() -> bool {
 
 impl Profile {
     pub fn data_root(&self, paths: &Paths) -> PathBuf {
-        self.data_root.clone().unwrap_or_else(|| paths.profiles_dir.join(&self.id))
+        self.data_root
+            .clone()
+            .unwrap_or_else(|| paths.profiles_dir.join(&self.id))
     }
 
     pub fn default_for(provider: ProviderKind) -> Self {
@@ -117,7 +119,11 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { schema: SCHEMA, settings: Settings::default(), profiles: vec![] }
+        Self {
+            schema: SCHEMA,
+            settings: Settings::default(),
+            profiles: vec![],
+        }
     }
 }
 
@@ -182,19 +188,35 @@ impl Config {
 
     pub fn unique_id(&self, name: &str, provider: ProviderKind) -> String {
         let base = slugify(name);
-        let base = if base.is_empty() { format!("{}-profile", provider.id()) } else { base };
+        let base = if base.is_empty() {
+            format!("{}-profile", provider.id())
+        } else {
+            base
+        };
         let mut id = base.clone();
         let mut n = 2;
-        while self.get(&id).is_some() || ProviderKind::ALL.iter().any(|p| p.default_profile_id() == id) {
+        while self.get(&id).is_some()
+            || ProviderKind::ALL
+                .iter()
+                .any(|p| p.default_profile_id() == id)
+        {
             id = format!("{base}-{n}");
             n += 1;
         }
         id
     }
 
-    pub fn validate_profile(&self, prof: &Profile, paths: &Paths, replacing: Option<&str>) -> Result<()> {
+    pub fn validate_profile(
+        &self,
+        prof: &Profile,
+        paths: &Paths,
+        replacing: Option<&str>,
+    ) -> Result<()> {
         if !is_valid_id(&prof.id) {
-            bail!("profile id {:?} may only contain lowercase letters, digits and dashes", prof.id);
+            bail!(
+                "profile id {:?} may only contain lowercase letters, digits and dashes",
+                prof.id
+            );
         }
         if prof.name.trim().is_empty() {
             bail!("profile name is empty");
@@ -236,13 +258,19 @@ pub fn slugify(name: &str) -> String {
         }
     }
     let out = out.trim_matches('-').to_string();
-    out.chars().take(32).collect::<String>().trim_matches('-').to_string()
+    out.chars()
+        .take(32)
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
 }
 
 pub fn is_valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 48
-        && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
         && !id.starts_with('-')
         && !id.ends_with('-')
 }
@@ -279,7 +307,10 @@ mod tests {
         p.isolated = true;
         c.profiles.push(p);
         assert_eq!(c.unique_id("Work", ProviderKind::Claude), "work-2");
-        assert_eq!(c.unique_id("claude default", ProviderKind::Claude), "claude-default-2");
+        assert_eq!(
+            c.unique_id("claude default", ProviderKind::Claude),
+            "claude-default-2"
+        );
     }
 
     #[test]
@@ -292,7 +323,8 @@ mod tests {
         p.id = "work".into();
         p.name = "Work".into();
         p.isolated = true;
-        p.env.insert("HTTPS_PROXY".into(), "http://127.0.0.1:7890".into());
+        p.env
+            .insert("HTTPS_PROXY".into(), "http://127.0.0.1:7890".into());
         c.validate_profile(&p, &paths, None).unwrap();
         c.profiles.push(p);
         c.save(&paths).unwrap();

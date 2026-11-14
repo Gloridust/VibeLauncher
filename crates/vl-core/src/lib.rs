@@ -71,7 +71,11 @@ impl Launcher {
     pub fn with_paths(paths: Paths) -> Result<Self> {
         paths.ensure()?;
         let config = Config::load(&paths)?;
-        Ok(Self { paths, config, installs: BTreeMap::new() })
+        Ok(Self {
+            paths,
+            config,
+            installs: BTreeMap::new(),
+        })
     }
 
     pub fn reload(&mut self) -> Result<()> {
@@ -89,7 +93,12 @@ impl Launcher {
         if let Some(i) = self.installs.get(&provider) {
             return i.clone();
         }
-        let over = self.config.settings.app_overrides.get(provider.id()).cloned();
+        let over = self
+            .config
+            .settings
+            .app_overrides
+            .get(provider.id())
+            .cloned();
         let found = install::find_install(provider, over.as_deref());
         self.installs.insert(provider, found.clone());
         found
@@ -97,7 +106,12 @@ impl Launcher {
 
     /// Every installation found (the chosen one first), for the settings page.
     pub fn candidates(&self, provider: ProviderKind) -> Vec<AppInstall> {
-        let over = self.config.settings.app_overrides.get(provider.id()).cloned();
+        let over = self
+            .config
+            .settings
+            .app_overrides
+            .get(provider.id())
+            .cloned();
         install::find_installs(provider, over.as_deref())
     }
 
@@ -106,16 +120,30 @@ impl Launcher {
     }
 
     pub fn all_installs(&mut self) -> Vec<AppInstall> {
-        ProviderKind::ALL.iter().filter_map(|p| self.install(*p)).collect()
+        ProviderKind::ALL
+            .iter()
+            .filter_map(|p| self.install(*p))
+            .collect()
     }
 
-    pub fn set_app_override(&mut self, provider: ProviderKind, path: Option<PathBuf>) -> Result<()> {
+    pub fn set_app_override(
+        &mut self,
+        provider: ProviderKind,
+        path: Option<PathBuf>,
+    ) -> Result<()> {
         match path {
             Some(p) => {
                 if install::from_manual_path(provider, &p).is_none() {
-                    bail!("{} doesn't look like {}", p.display(), provider.display_name());
+                    bail!(
+                        "{} doesn't look like {}",
+                        p.display(),
+                        provider.display_name()
+                    );
                 }
-                self.config.settings.app_overrides.insert(provider.id().into(), p);
+                self.config
+                    .settings
+                    .app_overrides
+                    .insert(provider.id().into(), p);
             }
             None => {
                 self.config.settings.app_overrides.remove(provider.id());
@@ -134,15 +162,28 @@ impl Launcher {
     // ── launching ──
 
     fn profile(&self, id: &str) -> Result<Profile> {
-        self.config.find(id).cloned().ok_or_else(|| anyhow!("no profile named {id:?}"))
+        self.config
+            .find(id)
+            .cloned()
+            .ok_or_else(|| anyhow!("no profile named {id:?}"))
     }
 
     pub fn launch_spec(&mut self, id: &str, url: Option<&str>) -> Result<provider::LaunchSpec> {
         let p = self.profile(id)?;
-        let inst = self
-            .install(p.provider)
-            .ok_or_else(|| anyhow!("{} isn't installed (or wasn't found). Choose it in Settings.", p.provider.display_name()))?;
-        Ok(provider::build_launch_spec(&p, &self.paths, &inst.program, &inst.base_args, inst.bundle.as_deref(), url))
+        let inst = self.install(p.provider).ok_or_else(|| {
+            anyhow!(
+                "{} isn't installed (or wasn't found). Choose it in Settings.",
+                p.provider.display_name()
+            )
+        })?;
+        Ok(provider::build_launch_spec(
+            &p,
+            &self.paths,
+            &inst.program,
+            &inst.base_args,
+            inst.bundle.as_deref(),
+            url,
+        ))
     }
 
     /// Start (or bring to front) a profile, optionally handing it a URL.
@@ -227,7 +268,11 @@ impl Launcher {
 
     /// Handle a URL the system gave us. `provider` comes from the shadow
     /// desktop entry; without it, the scheme decides.
-    pub fn open_url(&mut self, provider: Option<ProviderKind>, url: Option<&str>) -> Result<RouteResult> {
+    pub fn open_url(
+        &mut self,
+        provider: Option<ProviderKind>,
+        url: Option<&str>,
+    ) -> Result<RouteResult> {
         let url = url.map(str::trim).filter(|u| !u.is_empty());
         let Some(url) = url else {
             // The app's own menu entry was clicked (no URL): open the default.
@@ -236,7 +281,10 @@ impl Launcher {
             self.launch(&id, None)?;
             return Ok(RouteResult {
                 provider,
-                decision: Decision::To { profile: id, reason: Reason::Default },
+                decision: Decision::To {
+                    profile: id,
+                    reason: Reason::Default,
+                },
                 redacted: String::new(),
                 is_login: false,
             });
@@ -247,7 +295,11 @@ impl Launcher {
             .ok_or_else(|| anyhow!("VibeLauncher doesn't handle {}:// links", parsed.scheme()))?;
         let res = self.decide_route(provider, &parsed);
         if let Decision::To { profile, reason } = &res.decision {
-            self.deliver(profile, url, *reason == Reason::PendingLogin && res.is_login)?;
+            self.deliver(
+                profile,
+                url,
+                *reason == Reason::PendingLogin && res.is_login,
+            )?;
             router::PendingStore::new(&self.paths).log(&format!(
                 "{} → {} ({})",
                 res.redacted,
@@ -255,7 +307,8 @@ impl Launcher {
                 reason.describe()
             ));
         } else {
-            router::PendingStore::new(&self.paths).log(&format!("{} → asking the user", res.redacted));
+            router::PendingStore::new(&self.paths)
+                .log(&format!("{} → asking the user", res.redacted));
         }
         Ok(res)
     }
@@ -277,7 +330,12 @@ impl Launcher {
             .collect();
         let pending = router::PendingStore::new(&self.paths).load();
         let decision = router::decide(provider, is_login, &pending, &candidates, Utc::now());
-        RouteResult { provider, decision, redacted: router::redact(url.as_str()), is_login }
+        RouteResult {
+            provider,
+            decision,
+            redacted: router::redact(url.as_str()),
+            is_login,
+        }
     }
 
     /// Hand `url` to profile `id` (starting it if needed).
@@ -294,9 +352,17 @@ impl Launcher {
         let p = self.profile(id)?;
         let parsed = url::Url::parse(url.trim()).context("not a valid URL")?;
         if !p.provider.schemes().contains(&parsed.scheme()) {
-            bail!("{} can't open {}:// links", p.provider.display_name(), parsed.scheme());
+            bail!(
+                "{} can't open {}:// links",
+                p.provider.display_name(),
+                parsed.scheme()
+            );
         }
-        router::PendingStore::new(&self.paths).log(&format!("{} → {} (chosen by you)", router::redact(url), p.id));
+        router::PendingStore::new(&self.paths).log(&format!(
+            "{} → {} (chosen by you)",
+            router::redact(url),
+            p.id
+        ));
         self.deliver(&p.id, url, true)
     }
 
@@ -322,7 +388,9 @@ impl Launcher {
     /// Re-take the scheme a few times after a launch: the apps register
     /// themselves as handler when they start (macOS / Windows).
     pub fn reassert_after_launch(&mut self, provider: ProviderKind) {
-        let Some(inst) = self.install(provider) else { return };
+        let Some(inst) = self.install(provider) else {
+            return;
+        };
         for wait in [3u64, 8, 20, 45] {
             std::thread::sleep(Duration::from_secs(wait));
             let _ = scheme::reassert(provider, &inst, &self.paths);
@@ -338,7 +406,12 @@ impl Launcher {
 
     /// Routing is only worth taking over when there is more than one profile.
     pub fn routing_wanted(&self, provider: ProviderKind) -> bool {
-        self.routing_enabled(provider) && self.config.profiles.iter().any(|p| p.provider == provider && p.isolated)
+        self.routing_enabled(provider)
+            && self
+                .config
+                .profiles
+                .iter()
+                .any(|p| p.provider == provider && p.isolated)
     }
 
     /// Claim or release each scheme to match the settings. Returns problems.
@@ -349,7 +422,9 @@ impl Launcher {
             let st = scheme::status(provider, inst.as_ref(), &self.paths);
             let res = if self.routing_wanted(provider) {
                 match &inst {
-                    Some(i) if st.supported && (!st.claimed || st.stale) => scheme::claim(provider, i, &self.paths),
+                    Some(i) if st.supported && (!st.claimed || st.stale) => {
+                        scheme::claim(provider, i, &self.paths)
+                    }
                     _ => Ok(()),
                 }
             } else if st.claimed {
@@ -411,7 +486,8 @@ impl Launcher {
             p.env = input.env;
             p.extra_args = input.extra_args;
         }
-        self.config.validate_profile(&p, &self.paths, Some(&old.id))?;
+        self.config
+            .validate_profile(&p, &self.paths, Some(&old.id))?;
         if p.data_root != old.data_root && self.snapshot().is_running(&old.id) {
             bail!("quit {} before moving its data folder", old.name);
         }
@@ -445,7 +521,8 @@ impl Launcher {
         if delete_data {
             let root = p.data_root(&self.paths);
             if root.exists() {
-                trash::delete(&root).with_context(|| format!("moving {} to the trash", root.display()))?;
+                trash::delete(&root)
+                    .with_context(|| format!("moving {} to the trash", root.display()))?;
             }
         }
         self.config.profiles.retain(|x| x.id != p.id);
@@ -481,9 +558,13 @@ impl Launcher {
     }
 
     pub fn sync_shortcuts(&mut self) -> Vec<String> {
-        let installs: BTreeMap<ProviderKind, Option<AppInstall>> =
-            ProviderKind::ALL.iter().map(|p| (*p, self.install(*p))).collect();
-        shortcuts::sync(&self.paths, &self.config, &|p| installs.get(&p).cloned().flatten())
+        let installs: BTreeMap<ProviderKind, Option<AppInstall>> = ProviderKind::ALL
+            .iter()
+            .map(|p| (*p, self.install(*p)))
+            .collect();
+        shortcuts::sync(&self.paths, &self.config, &|p| {
+            installs.get(&p).cloned().flatten()
+        })
     }
 
     pub fn data_size(&self, id: &str) -> Option<u64> {
@@ -497,7 +578,9 @@ impl Launcher {
 
 /// Total size of the files under `p` (symlinks not followed).
 pub fn dir_size(p: &std::path::Path, depth: u32) -> u64 {
-    let Ok(meta) = std::fs::symlink_metadata(p) else { return 0 };
+    let Ok(meta) = std::fs::symlink_metadata(p) else {
+        return 0;
+    };
     if meta.is_file() {
         return meta.len();
     }
@@ -505,6 +588,10 @@ pub fn dir_size(p: &std::path::Path, depth: u32) -> u64 {
         return 0;
     }
     std::fs::read_dir(p)
-        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| dir_size(&e.path(), depth + 1)).sum())
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| dir_size(&e.path(), depth + 1))
+                .sum()
+        })
         .unwrap_or(0)
 }

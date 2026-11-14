@@ -52,9 +52,14 @@ impl Args {
             if let Some(name) = a.strip_prefix("--") {
                 let (k, v) = match name.split_once('=') {
                     Some((k, v)) => (k.to_string(), Some(v.to_string())),
-                    None if valued.contains(&name) => {
-                        (name.to_string(), Some(it.next().cloned().ok_or_else(|| anyhow!("--{name} needs a value"))?))
-                    }
+                    None if valued.contains(&name) => (
+                        name.to_string(),
+                        Some(
+                            it.next()
+                                .cloned()
+                                .ok_or_else(|| anyhow!("--{name} needs a value"))?,
+                        ),
+                    ),
                     None => (name.to_string(), None),
                 };
                 flags.push((k, v));
@@ -68,10 +73,16 @@ impl Args {
         self.flags.iter().any(|(f, _)| f == k)
     }
     fn val(&self, k: &str) -> Option<&str> {
-        self.flags.iter().find(|(f, _)| f == k).and_then(|(_, v)| v.as_deref())
+        self.flags
+            .iter()
+            .find(|(f, _)| f == k)
+            .and_then(|(_, v)| v.as_deref())
     }
     fn need(&self, i: usize, what: &str) -> Result<&str> {
-        self.pos.get(i).map(String::as_str).ok_or_else(|| anyhow!("missing {what} (see `vibelauncher --help`)"))
+        self.pos
+            .get(i)
+            .map(String::as_str)
+            .ok_or_else(|| anyhow!("missing {what} (see `vibelauncher --help`)"))
     }
 }
 
@@ -79,8 +90,29 @@ impl Args {
 /// window (the AppImage has only one executable, and shortcuts run it).
 pub fn is_command(first: &str) -> bool {
     const CMDS: &[&str] = &[
-        "-h", "--help", "help", "-V", "--version", "version", "list", "ls", "ps", "launch", "open", "login", "quit",
-        "open-url", "route", "create", "new", "delete", "rm", "doctor", "shortcuts", "scheme", "log",
+        "-h",
+        "--help",
+        "help",
+        "-V",
+        "--version",
+        "version",
+        "list",
+        "ls",
+        "ps",
+        "launch",
+        "open",
+        "login",
+        "quit",
+        "open-url",
+        "route",
+        "create",
+        "new",
+        "delete",
+        "rm",
+        "doctor",
+        "shortcuts",
+        "scheme",
+        "log",
         "internal-reassert",
     ];
     CMDS.contains(&first) || first.contains("://")
@@ -157,7 +189,12 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
                 extra_args: vec![],
                 shortcut: a.has("shortcut"),
             })?;
-            println!("Created {} ({}). Data: {}", p.name, p.id, p.data_root(&l.paths).display());
+            println!(
+                "Created {} ({}). Data: {}",
+                p.name,
+                p.id,
+                p.data_root(&l.paths).display()
+            );
         }
         "delete" | "rm" => {
             let a = Args::parse(rest, &[])?;
@@ -195,8 +232,15 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
             for p in providers {
                 let inst = l.install(p);
                 match a.pos.first().map(String::as_str).unwrap_or("status") {
-                    "status" => println!("{}", serde_json::to_string_pretty(&scheme::status(p, inst.as_ref(), &l.paths))?),
-                    "claim" => scheme::claim(p, &inst.ok_or_else(|| anyhow!("{} not found", p.display_name()))?, &l.paths)?,
+                    "status" => println!(
+                        "{}",
+                        serde_json::to_string_pretty(&scheme::status(p, inst.as_ref(), &l.paths))?
+                    ),
+                    "claim" => scheme::claim(
+                        p,
+                        &inst.ok_or_else(|| anyhow!("{} not found", p.display_name()))?,
+                        &l.paths,
+                    )?,
                     "release" => scheme::release(p, inst.as_ref(), &l.paths)?,
                     o => bail!("unknown `scheme {o}`"),
                 }
@@ -245,7 +289,11 @@ fn open_url(rest: &[String]) -> Result<ExitCode> {
         if open_gui(&["--choose-route".into(), url.into()]).is_err() {
             // No GUI available: prefer a running profile, else the first.
             let snap = l.snapshot();
-            let pick = candidates.iter().find(|c| snap.is_running(c)).or(candidates.first()).cloned();
+            let pick = candidates
+                .iter()
+                .find(|c| snap.is_running(c))
+                .or(candidates.first())
+                .cloned();
             match pick {
                 Some(id) => l.deliver_choice(&id, url)?,
                 None => bail!("no profile to open the link"),
@@ -256,8 +304,9 @@ fn open_url(rest: &[String]) -> Result<ExitCode> {
 }
 
 fn open_gui(args: &[String]) -> Result<()> {
-    let gui = vl_core::paths::gui_exe()
-        .ok_or_else(|| anyhow!("the VibeLauncher window (vibelauncher-gui) isn't installed next to this program"))?;
+    let gui = vl_core::paths::gui_exe().ok_or_else(|| {
+        anyhow!("the VibeLauncher window (vibelauncher-gui) isn't installed next to this program")
+    })?;
     vl_core::launch::keep_std_handles_private();
     let mut c = std::process::Command::new(gui);
     c.args(args)
@@ -361,5 +410,9 @@ fn doctor_cmd(l: &mut Launcher, fix: bool, json: bool) -> Result<ExitCode> {
             }
         }
     }
-    Ok(if failed { ExitCode::from(1) } else { ExitCode::SUCCESS })
+    Ok(if failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
 }

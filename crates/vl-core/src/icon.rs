@@ -23,7 +23,12 @@ pub fn parse_hex(c: &str) -> [u8; 3] {
 
 /// Load an icon file (PNG, or ICNS on macOS) as RGBA at [`SIZE`].
 pub fn load_base(path: &Path) -> Option<RgbaImage> {
-    let img = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    let img = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         #[cfg(target_os = "macos")]
         Some("icns") => load_icns(path)?,
         _ => image::open(path).ok()?.to_rgba8(),
@@ -44,8 +49,15 @@ fn load_icns(path: &Path) -> Option<RgbaImage> {
         .into_iter()
         .filter(|t| t.pixel_width() >= 128)
         .min_by_key(|t| (t.pixel_width() as i64 - 512).abs())
-        .or_else(|| fam.available_icons().into_iter().max_by_key(|t| t.pixel_width()))?;
-    let img = fam.get_icon_with_type(ty).ok()?.convert_to(icns::PixelFormat::RGBA);
+        .or_else(|| {
+            fam.available_icons()
+                .into_iter()
+                .max_by_key(|t| t.pixel_width())
+        })?;
+    let img = fam
+        .get_icon_with_type(ty)
+        .ok()?
+        .convert_to(icns::PixelFormat::RGBA);
     RgbaImage::from_raw(img.width(), img.height(), img.into_data().into_vec())
 }
 
@@ -60,7 +72,11 @@ fn placeholder(color: [u8; 3]) -> RgbaImage {
         let cy = fy.clamp(lo + r, hi - r);
         let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt() - r;
         let inside = fx >= lo && fx <= hi && fy >= lo && fy <= hi;
-        let a = if inside { (0.5 - d).clamp(0.0, 1.0) } else { 0.0 };
+        let a = if inside {
+            (0.5 - d).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         *px = Rgba([color[0], color[1], color[2], (a * 255.0) as u8]);
     }
     img
@@ -112,13 +128,20 @@ pub fn compose(install: Option<&AppInstall>, profile: &Profile) -> RgbaImage {
 
 /// Write the profile's icon files and return the one the platform's
 /// shortcuts use (PNG on Linux, ICNS on macOS, ICO on Windows).
-pub fn write_profile_icon(paths: &Paths, install: Option<&AppInstall>, profile: &Profile) -> Result<PathBuf> {
+pub fn write_profile_icon(
+    paths: &Paths,
+    install: Option<&AppInstall>,
+    profile: &Profile,
+) -> Result<PathBuf> {
     let dir = paths.icons_dir();
     std::fs::create_dir_all(&dir)?;
     let img = compose(install, profile);
     let png = dir.join(format!("{}.png", profile.id));
     let mut bytes = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)?;
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )?;
     crate::paths::write_atomic(&png, &bytes).context("writing icon")?;
     #[cfg(target_os = "macos")]
     {
@@ -158,8 +181,15 @@ pub fn data_url(install: Option<&AppInstall>, profile: &Profile, size: u32) -> O
     let img = compose(install, profile);
     let img = imageops::resize(&img, size, size, imageops::FilterType::Lanczos3);
     let mut bytes = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).ok()?;
-    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 /// Base64 PNG of the app icon itself (no badge).
@@ -168,8 +198,15 @@ pub fn app_icon_data_url(install: &AppInstall, size: u32) -> Option<String> {
     let img = load_base(install.icon.as_deref()?)?;
     let img = imageops::resize(&img, size, size, imageops::FilterType::Lanczos3);
     let mut bytes = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).ok()?;
-    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 #[cfg(test)]

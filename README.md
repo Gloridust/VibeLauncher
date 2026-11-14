@@ -127,8 +127,10 @@ than one profile of it, and hands it back when you turn routing off:
 - **Windows:** the per-user (`HKCU`) handler, with the previous value backed up.
 
 Uninstalling on Windows gives the links back and removes the shortcuts by itself. On macOS and Linux,
-run `vibelauncher cleanup` before deleting the app; if you forget, links still reach the app (the
-Linux entry and the macOS router fall back to it), and the shortcuts are the only thing left over.
+run `vibelauncher cleanup` before deleting the app; if you forget, links should still reach the app
+(the Linux entry and the macOS router fall back to it; the macOS fallback is on the manual checklist),
+and the shortcuts are the only thing left over. On Windows, installing a newer version over an old
+one keeps the links and shortcuts.
 Profiles and their data are never removed by uninstalling.
 
 More detail, including measurements and design notes, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

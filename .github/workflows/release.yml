@@ -14,6 +14,9 @@ on:
       - .github/workflows/release.yml
       - app/src-tauri/tauri.conf.json
       - app/src-tauri/tauri.bundle.conf.json
+      - app/src-tauri/windows/**
+      - .github/scripts/installer-check.sh
+      - crates/vibelauncher/src/lib.rs
 
 permissions:
   contents: write
@@ -110,6 +113,9 @@ jobs:
                 { echo "$v<<VLEOF"; printf '%s\n' "${!v}"; echo "VLEOF"; } >> "$GITHUB_ENV"
               fi
             done
+            # tauri.conf.json has the ad-hoc identity "-"; replace it.
+            printf '{"bundle":{"macOS":{"signingIdentity":"%s"}}}' "$APPLE_SIGNING_IDENTITY" > app/src-tauri/tauri.signing.conf.json
+            echo "SIGN_CONFIG=--config src-tauri/tauri.signing.conf.json" >> "$GITHUB_ENV"
             if [ -n "$APPLE_ID" ]; then echo "Signing and notarizing"; else echo "Signing (not notarized: APPLE_ID not set)"; fi
           elif [ "${{ runner.os }}" = Windows ] && [ -n "$WINDOWS_CERTIFICATE" ]; then
             printf '%s' "$WINDOWS_CERTIFICATE" | base64 -d > "$RUNNER_TEMP/cert.pfx"
@@ -130,6 +136,15 @@ jobs:
         shell: bash
         run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG
 
+      # Install, upgrade and uninstall with the hooks in
+      # app/src-tauri/windows/hooks.nsh, using a stand-in Claude.
+      - name: Check the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release --locked -p vibelauncher --features smoke-test --bin vl-fake-app --target ${{ matrix.target }}
+          bash .github/scripts/installer-check.sh ${{ matrix.target }}
+
       - name: Check the signatures
         if: env.APPLE_CERTIFICATE != '' || env.SIGN_CONFIG != ''
         shell: bash
@@ -137,7 +152,14 @@ jobs:
           if [ "${{ runner.os }}" = macOS ]; then
             app=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
             codesign --verify --deep --strict --verbose=2 "$app"
-            codesign -dv "$app/Contents/MacOS/vibelauncher" 2>&1 | grep -E 'Authority|TeamIdentifier'
+            # An ad-hoc signature also verifies; require the Developer ID.
+            for f in "$app" "$app/Contents/MacOS/vibelauncher"; do
+              info=$(codesign -dv --verbose=4 "$f" 2>&1)
+              echo "$info" | grep -E '^(Authority|TeamIdentifier)='
+              if ! echo "$info" | grep -q '^Authority=Developer ID Application'; then
+                echo "::error::$f isn't signed with a Developer ID"; exit 1
+              fi
+            done
             if [ -n "${APPLE_ID:-}" ]; then
               xcrun stapler validate "$app"
               spctl -a -vvv "$app"

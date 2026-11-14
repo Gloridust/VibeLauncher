@@ -84,7 +84,7 @@ pub fn is_command(first: &str) -> bool {
     const CMDS: &[&str] = &[
         "-h", "--help", "help", "-V", "--version", "version", "list", "ls", "ps", "launch", "open", "login", "quit",
         "open-url", "route", "create", "new", "delete", "rm", "doctor", "shortcuts", "scheme", "log", "cleanup",
-        "internal-reassert",
+        "internal-reassert", "internal-restore",
     ];
     CMDS.contains(&first) || first.contains("://")
 }
@@ -215,6 +215,20 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
                 return Ok(ExitCode::from(1));
             }
             println!("Links are handled by the apps again and the shortcuts are gone. Profiles and their data are kept.");
+        }
+        // Run by the Windows installer: put back what `cleanup` removed when
+        // an upgrade ran the old uninstaller (links and shortcuts for the
+        // profiles that still exist). Does nothing without profiles.
+        "internal-restore" => {
+            let mut l = Launcher::open()?;
+            let mut errs = l.apply_routing();
+            errs.extend(l.sync_shortcuts());
+            for e in &errs {
+                eprintln!("{e}");
+            }
+            if !errs.is_empty() {
+                return Ok(ExitCode::from(1));
+            }
         }
         "log" => {
             let l = Launcher::open()?;

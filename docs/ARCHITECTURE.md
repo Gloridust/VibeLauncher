@@ -270,7 +270,7 @@ trait Platform {
 
 **卸载时**
 - `vibelauncher cleanup`：释放所有认领的链接（交回备份里的原处理程序），删掉各配置的快捷方式；配置和数据不动。
-- Windows 安装器在卸载前自动调用它（`app/src-tauri/windows/hooks.nsh` 的 `NSIS_HOOK_PREUNINSTALL`；升级时 `$UpdateMode` 为 1，跳过）。
+- Windows 安装器在卸载前自动调用它（`app/src-tauri/windows/hooks.nsh` 的 `NSIS_HOOK_PREUNINSTALL`）。手动装新版时，安装器默认先就地运行旧版的卸载程序（不带 `/UPDATE`），所以这一步升级时也会跑；装完后 `NSIS_HOOK_POSTINSTALL` 运行 `vibelauncher internal-restore`，按仍然存在的配置把链接和快捷方式恢复（全新安装时什么也不做）。Release 工作流在 Windows 上实际安装、重装、模拟升级、卸载一遍检查这些（`.github/scripts/installer-check.sh`）。
 - macOS 没有卸载程序可挂。路由应用每次生成时把原处理程序的 Bundle ID 写进脚本：找不到 `vibelauncher` 时用 `open -b <原应用>` 直接交给应用，所以直接删掉 VibeLauncher 也不会让登录链接失效。认领时若系统还没有处理程序，就记应用自己的 Bundle ID。
 - Linux 的同名覆盖本来就在找不到启动器时回退到应用。
 

@@ -29,6 +29,7 @@ CI 每次都用替身应用把命令行流程和窗口操作跑一遍，但替�
 ## 4. 安装包
 
 - [ ] macOS：从 `.dmg` 拖进“应用程序”，能打开（未签名时右键“打开”）；“快捷方式”开关会在 `~/Applications/VibeLauncher` 生成 “Claude · Test”，从启动台/聚焦能打开到对应配置。
-- [ ] Windows：安装器能装（未签名时 SmartScreen 选“仍要运行”）；“快捷方式”会出现在开始菜单；卸载后快捷方式与链接处理都清理掉。
+- [ ] Windows：安装器能装（未签名时 SmartScreen 选“仍要运行”）；“快捷方式”会出现在开始菜单；卸载后快捷方式与链接处理都清理掉（CI 用替身应用检查过安装、升级、卸载，这里确认真实应用也一样）。
+- [ ] macOS：路由开着时**不运行** `vibelauncher cleanup`，直接把 VibeLauncher 拖进废纸篓并清空；再在浏览器里打开一个 `claude://` 链接，应当直接打开 Claude（CI 只检查过路由脚本能编译，转交给应用本身要在真机上看）。之后把这台机器上的 VibeLauncher 装回来。
 
 发现问题请开 issue，附上系统版本、应用版本、`vibelauncher doctor` 的输出和 `vibelauncher log` 的最后几行（这两项都不含登录码）。

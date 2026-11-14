@@ -496,10 +496,35 @@ fn smoke() {
             eprintln!("✓ the system delivered {url} to Smoke Work through VibeLauncher");
         }
     }
+    // The re-take that runs after a launch keeps the scheme while it's ours…
+    if let Some((_, home)) = s.vars.iter().find(|(k, _)| k == "VIBELAUNCHER_HOME") {
+        assert!(PathBuf::from(home).join("state/scheme-claimed-claude").exists(), "the claim wasn't noted");
+    }
+    if cfg!(target_os = "windows") && s.os_dispatch {
+        // Like the real app does when it starts: point claude:// back at itself.
+        let cmd = format!("\"{}\" \"%1\"", s.app_path.display());
+        let ok = Command::new("reg")
+            .args(["add", r"HKCU\Software\Classes\claude\shell\open\command", "/ve", "/d", &cmd, "/f"])
+            .stdout(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "couldn't stand in for the app taking claude:// back");
+        let status = s.json(&["scheme", "status", "claude"]);
+        assert_eq!(status["claimed"], false, "the app's re-registration didn't show: {status}");
+    }
+    s.ok(&["internal-reassert", "claude", "--now"]);
+    let status = s.json(&["scheme", "status", "claude"]);
+    assert_eq!(status["claimed"], true, "lost by a re-take: {status}");
     s.ok(&["scheme", "release", "claude"]);
     let status = s.json(&["scheme", "status", "claude"]);
     assert_eq!(status["claimed"], false, "still claimed: {status}");
     // The stand-in declares claude:// like the real app, so it gets it back.
+    handed_back(&status, &CLAUDE);
+    // …and doesn't take it back once released (a late one used to, on macOS).
+    s.ok(&["internal-reassert", "claude", "--now"]);
+    let status = s.json(&["scheme", "status", "claude"]);
+    assert_eq!(status["claimed"], false, "taken back after release: {status}");
     handed_back(&status, &CLAUDE);
 
     // ── shortcuts ──

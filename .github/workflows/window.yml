@@ -3,6 +3,8 @@ name: Window
 # Opens the real manager window on macOS and Windows and keeps screenshots,
 # so the window is checked on systems nobody here uses day to day.
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

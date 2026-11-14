@@ -322,15 +322,23 @@ impl Launcher {
     /// Re-take the scheme a few times after a launch: the apps register
     /// themselves as handler when they start (macOS / Windows).
     pub fn reassert_after_launch(&mut self, provider: ProviderKind) {
-        let Some(inst) = self.install(provider) else { return };
         for wait in [3u64, 8, 20, 45] {
             std::thread::sleep(Duration::from_secs(wait));
-            // Routing may have been turned off meanwhile.
-            if self.reload().is_err() || !self.routing_wanted(provider) {
+            if !self.reassert_now(provider) {
                 return;
             }
-            let _ = scheme::reassert(provider, &inst, &self.paths);
         }
+    }
+
+    /// One re-take, unless routing was turned off or the scheme released
+    /// meanwhile. Returns whether it's still worth trying later.
+    pub fn reassert_now(&mut self, provider: ProviderKind) -> bool {
+        if self.reload().is_err() || !self.routing_wanted(provider) {
+            return false;
+        }
+        let Some(inst) = self.install(provider) else { return false };
+        let _ = scheme::reassert(provider, &inst, &self.paths);
+        true
     }
 
     pub fn routing_enabled(&self, provider: ProviderKind) -> bool {

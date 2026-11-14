@@ -213,7 +213,12 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
             let a = Args::parse(rest, &[])?;
             let p = ProviderKind::parse(a.need(0, "app")?).ok_or_else(|| anyhow!("unknown app"))?;
             let mut l = Launcher::open()?;
-            l.reassert_after_launch(p);
+            // `--now`: one attempt without waiting (used by the tests).
+            if a.has("now") {
+                l.reassert_now(p);
+            } else {
+                l.reassert_after_launch(p);
+            }
         }
         other => {
             // `vibelauncher claude://…` (macOS / Windows hand us the URL alone).

@@ -265,7 +265,7 @@ trait Platform {
 - 这里没有「同名覆盖」，处理程序按 Bundle ID 记在 Launch Services 里。Claude 启动时会把自己设回默认，而它的 Google 登录又依赖「自己是处理程序」。
 - 候选方案，按顺序实测：
   1. **不接管，靠时机**：发起登录时只打开目标 Profile，确保登录期间它是唯一运行中的 Claude（或最后启动的那个），回调自然会到它。用待登录标记 + 界面提示「请先关闭其他 Claude 窗口」配合。最稳，但体验一般。
-  2. **启动器注册为处理程序，并在每次启动 Profile 后几秒重新注册**（`LSSetDefaultHandlerForURLScheme`）。风险：Claude 发现自己不是处理程序后会换登录方式，可能反而更顺。要实测看结果。
+  2. **启动器注册为处理程序，并在每次启动 Profile 后几秒重新注册**（`LSSetDefaultHandlerForURLScheme`）。风险：Claude 发现自己不是处理程序后会换登录方式，可能反而更顺。要实测看结果。重新注册在后台进程里跑（`internal-reassert`），每次动手前先确认路由还开着、链接没被释放（`state/scheme-claimed-<app>`），释放后不再抢回；认领、释放、重新注册跨进程互斥（`state/scheme.lock`），避免 macOS 上两个进程同时重建路由应用。
   3. 兜底：粘贴回调链接手动转交。
 
 **Windows【未验证】**

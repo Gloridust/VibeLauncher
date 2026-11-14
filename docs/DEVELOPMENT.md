@@ -27,6 +27,13 @@ isolated profiles of it, and hands it back when you turn routing off:
 - **Windows:** the per-user (`HKCU`) handler, with the previous value backed up. The installer
   gives it back on uninstall and keeps it across upgrades.
 
+Updates: the window checks `latest.json` on the latest GitHub release when it opens (unless
+turned off in Settings). Installing downloads the package of the same kind as the running copy,
+checks its signature against the public key in `tauri.conf.json`, and installs it: the AppImage
+and the `.app` replace themselves, Windows runs the installer in update mode (the hooks keep
+links and shortcuts), and deb/rpm packages are installed with a single `pkexec` prompt. A build
+that isn't a package (`cargo run`) only points to the download page.
+
 Design notes and measurements (in Chinese): [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Command line

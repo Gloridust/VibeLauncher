@@ -4,6 +4,7 @@ import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { CheckCircle2, AlertCircle } from "lucide-preact";
 import type { LucideIcon } from "lucide-preact";
 import type { ProfileView, StateView } from "./api";
+import type { Updater } from "./update";
 
 // ── shared app context ──
 
@@ -13,6 +14,7 @@ export interface Ctx {
   toast: (text: string, kind?: "ok" | "error") => void;
   /** Run an action, report its error as a toast; returns whether it worked. */
   run: (fn: () => Promise<unknown>, okText?: string) => Promise<boolean>;
+  update: Updater;
 }
 export const AppCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useApp = () => useContext(AppCtx);

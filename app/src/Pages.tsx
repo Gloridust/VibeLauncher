@@ -347,6 +347,14 @@ export function SettingsPage(props: { onSettingsChanged: (s: Settings) => void }
                 </div>
               </div>
             </div>
+            <UpdateRow />
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">{t("update.auto")}</div>
+                <div class="row-sub">{t("update.autoHint")}</div>
+              </div>
+              <Switch on={s.checkUpdates} onChange={(checkUpdates) => save({ checkUpdates })} label={t("update.auto")} />
+            </div>
             <div class="row">
               <div class="row-main">{t("settings.website")}</div>
               <button class="btn sm" onClick={() => run(() => api.openWebsite("home"))}>
@@ -375,6 +383,70 @@ export function SettingsPage(props: { onSettingsChanged: (s: Settings) => void }
         </div>
       </div>
     </>
+  );
+}
+
+function UpdateRow() {
+  const { state, run, update: u } = useApp();
+  const busy = u.phase === "checking" || u.phase === "downloading" || u.phase === "installing";
+  const pct = u.progress == null ? "" : `${Math.round(u.progress * 100)}%`;
+  const sub =
+    u.phase === "checking"
+      ? t("update.checking")
+      : u.phase === "current"
+        ? t("update.current")
+        : u.phase === "available" && u.info
+          ? t("update.available", { version: u.info.version })
+          : u.phase === "downloading"
+            ? t("update.downloading", { pct })
+            : u.phase === "installing"
+              ? t("update.installing")
+              : u.phase === "error"
+                ? t("update.failed", { error: u.error ?? "" })
+                : t("update.idle");
+  const hint =
+    u.phase === "available"
+      ? !state.updateKind
+        ? t("update.manualOnly")
+        : state.updateKind === "deb" || state.updateKind === "rpm"
+          ? t("update.password")
+          : null
+      : null;
+  return (
+    <div class="row" data-update={u.phase}>
+      <div class="row-main">
+        <div class="row-title">{t("update.title")}</div>
+        <div class={"row-sub" + (u.phase === "error" ? " lvl-warning selectable" : "")} aria-live="polite">
+          {sub}
+        </div>
+        {hint && <div class="row-sub faint">{hint}</div>}
+        {u.phase === "downloading" && (
+          <div class="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={u.progress == null ? undefined : Math.round(u.progress * 100)}>
+            <div class={u.progress == null ? "indeterminate" : ""} style={u.progress == null ? undefined : { width: pct }} />
+          </div>
+        )}
+      </div>
+      {(u.phase === "available" || u.phase === "downloading" || u.phase === "installing") && (
+        <button class="btn sm ghost" onClick={() => run(() => api.openWebsite("releases"))}>
+          {t("action.whatsNew")}
+        </button>
+      )}
+      {u.info && state.updateKind && u.phase !== "checking" && u.phase !== "current" ? (
+        <button class="btn sm primary" disabled={busy} onClick={u.install}>
+          {(u.phase === "downloading" || u.phase === "installing") && <Loader2 class="spin" />}
+          {t("action.updateRestart")}
+        </button>
+      ) : u.info && !state.updateKind ? (
+        <button class="btn sm primary" onClick={() => run(() => api.openWebsite("releases"))}>
+          {t("action.download")}
+        </button>
+      ) : (
+        <button class="btn sm" disabled={busy} onClick={u.check}>
+          {u.phase === "checking" && <Loader2 class="spin" />}
+          {t("action.checkNow")}
+        </button>
+      )}
+    </div>
   );
 }
 

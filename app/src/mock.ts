@@ -3,7 +3,9 @@
 
 import type { AppView, Check, ProfileInput, ProfileView, RouteRequest, Settings, StateView } from "./api";
 
-const scenario = new URLSearchParams(location.search).get("scenario") ?? "busy";
+const params = new URLSearchParams(location.search);
+const scenario = params.get("scenario") ?? "busy";
+// ?update=1 (or =manual, for a copy that can't update itself) pretends a new version is out.
 
 function svgIcon(bg: string, badge?: string): string {
   const b = badge
@@ -44,6 +46,7 @@ let settings: Settings = {
   theme: (new URLSearchParams(location.search).get("theme") as Settings["theme"]) ?? "auto",
   appOverrides: {},
   onboarded: scenario !== "fresh",
+  checkUpdates: true,
 };
 
 let profiles: ProfileView[] = [
@@ -109,6 +112,7 @@ function state(): StateView {
     profilesDir: "/home/me/.local/share/vibelauncher/profiles",
     configFile: "/home/me/.config/vibelauncher/profiles.toml",
     cli: "/usr/bin/vibelauncher",
+    updateKind: params.get("update") === "manual" ? null : "deb",
   };
 }
 
@@ -251,6 +255,12 @@ export async function mockInvoke(cmd: string, a: Record<string, any> = {}): Prom
       return;
     case "opened_for_route":
       return scenario === "route";
+    case "check_update":
+      await sleep(600);
+      return params.get("update") ? { version: "0.3.0", current: "0.2.0", notes: "Faster start-up.\nFixes sign-in links on Fedora.", date: "2026-11-20T08:00:00Z" } : null;
+    case "install_update":
+      await sleep(1500);
+      return;
   }
   throw `mock: unknown command ${cmd}`;
 }

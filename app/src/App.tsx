@@ -7,6 +7,7 @@ import { Diagnostics, SettingsPage, Welcome } from "./Pages";
 import { DeleteSheet, LoginSheet, ProfileSheet, RouteSheet } from "./Sheets";
 import { Sidebar, type View } from "./Sidebar";
 import { AppCtx, type Ctx, type Toast, Toasts } from "./ui";
+import { useUpdater } from "./update";
 
 type SheetState =
   | { kind: "new"; provider?: Provider }
@@ -34,6 +35,7 @@ export function App() {
   const openedForRoute = useRef(false);
   const toastId = useRef(0);
   const shown = useRef(false);
+  const update = useUpdater(state);
 
   const refresh = useCallback(async () => {
     try {
@@ -217,7 +219,7 @@ export function App() {
     ) : null;
   }
 
-  const ctx: Ctx = { state, refresh, toast, run };
+  const ctx: Ctx = { state, refresh, toast, run, update };
   const issues = {
     warn: checks?.filter((c) => c.level === "warning").length ?? 0,
     err: checks?.filter((c) => c.level === "error").length ?? 0,

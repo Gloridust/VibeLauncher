@@ -107,6 +107,15 @@ const steps: [string, () => Promise<void>][] = [
     await click("Check again", () => button("Check again"));
     await waitFor("the checks again", done, 30_000);
   }],
+  ["settings show updates", async () => {
+    await click("Settings", () => all<HTMLButtonElement>(".sidebar-bottom button")[0] ?? null);
+    // The automatic check may still be running; any settled state will do.
+    await waitFor("the Updates row", () => {
+      const row = document.querySelector<HTMLElement>("[data-update]");
+      return row && text(row).startsWith("Updates") && !/^(checking|downloading|installing)$/.test(row.dataset.update ?? "");
+    }, 40_000);
+    await waitFor("the automatic check switch", () => all("[role=switch]").find((b) => b.getAttribute("aria-label") === "Check for updates automatically"));
+  }],
   ["switch to Chinese and dark", async () => {
     await click("Settings", () => all<HTMLButtonElement>(".sidebar-bottom button")[0] ?? null);
     await click("简体中文", () => button("简体中文"));

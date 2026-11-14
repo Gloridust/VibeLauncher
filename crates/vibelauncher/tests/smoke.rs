@@ -414,6 +414,10 @@ fn smoke() {
     assert!(list.contains("ChatGPT") && !list.contains("ChatGPT (not found)"), "ChatGPT not found:\n{list}");
     // Before anything is claimed: who the system sends claude:// to (logged only).
     let _ = s.cmd(&["scheme", "status", "claude"]);
+    // Claude writes its own copy of its entry into the user's applications
+    // folder on every start (with extra launcher actions). VibeLauncher has to
+    // replace it, keep its actions, and put it back when it lets go.
+    let app_entry = app_written_entry(&s);
 
     // ── create + launch: own data folder and CLAUDE_CONFIG_DIR ──
     s.ok(&["create", "Smoke Work", "--app", "claude"]);
@@ -422,6 +426,13 @@ fn smoke() {
     let work_id = work["id"].as_str().unwrap().to_string();
     let work_root = PathBuf::from(work["dataRoot"].as_str().unwrap());
     let personal_id = s.profile("Smoke Personal")["id"].as_str().unwrap().to_string();
+    if let Some(p) = &app_entry {
+        let text = std::fs::read_to_string(p).unwrap();
+        assert!(text.contains("X-VibeLauncher=true") && !text.contains("X-Claude-Generated"), "the app's own entry wasn't replaced:\n{text}");
+        assert!(text.contains("[Desktop Action ContinueLast]") && text.contains("open-url --provider claude"), "the app's actions were lost:\n{text}");
+        let status = s.json(&["scheme", "status", "claude"]);
+        assert!(status["claimed"] == true && status["conflict"].is_null(), "{status}");
+    }
 
     let n = s.launches().len();
     let t = Instant::now();
@@ -589,6 +600,10 @@ fn smoke() {
     handed_back(&status, &CHATGPT);
     assert_eq!(s.json(&["scheme", "status", "claude"])["claimed"], false);
     assert!(!shortcut.exists(), "cleanup left the shortcut at {}", shortcut.display());
+    if let Some(p) = &app_entry {
+        let text = std::fs::read_to_string(p).unwrap_or_default();
+        assert!(text.contains("X-Claude-Generated=true") && !text.contains("X-VibeLauncher"), "the app's own entry wasn't put back:\n{text}");
+    }
     assert!(s.profile("Smoke Personal")["id"].is_string(), "cleanup removed a profile");
     assert!(work_root.exists(), "cleanup removed profile data");
 
@@ -603,6 +618,28 @@ fn smoke() {
     assert!(!shortcut.exists(), "shortcut left behind at {}", shortcut.display());
     assert!(!work_root.exists(), "data left behind at {}", work_root.display());
     assert!(!chat_root.exists(), "data left behind at {}", chat_root.display());
+}
+
+/// Linux (sandbox only): write the user entry Claude makes for itself on start,
+/// as Claude does, before VibeLauncher takes the scheme.
+fn app_written_entry(s: &Smoke) -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let data = s.vars.iter().find(|(n, _)| n == "XDG_DATA_HOME").map(|(_, v)| PathBuf::from(v))?;
+    let dir = data.join("applications");
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join(format!("vl-smoke-{}.desktop", CLAUDE.id));
+    let exe = s.app_path.display();
+    std::fs::write(
+        &p,
+        format!(
+            "[Desktop Entry]\nType=Application\nName={}\nExec={exe} %u\nMimeType=x-scheme-handler/{};\nTryExec={exe}\nActions=ContinueLast;\nX-Claude-Generated=true\n\n[Desktop Action ContinueLast]\nName=Continue Last Session\nExec={exe} \"{}://code/continue\"\n",
+            CLAUDE.name, CLAUDE.scheme, CLAUDE.scheme
+        ),
+    )
+    .unwrap();
+    Some(p)
 }
 
 /// After `scheme release`, the app (here the stand-in, which declares the

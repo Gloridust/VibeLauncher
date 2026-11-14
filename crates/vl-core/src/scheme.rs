@@ -7,6 +7,12 @@
 //! flow), and every `claude://` URL goes through VibeLauncher. If VibeLauncher
 //! is ever removed, the entry falls back to running the app directly.
 //!
+//! Recent Claude builds write that same user entry themselves on every start
+//! (marked `X-Claude-Generated=true`, adding a few launcher actions), but only
+//! while no entry made by someone else is there. VibeLauncher replaces the
+//! app's copy (keeping its extra actions), and once ours is in place the app
+//! leaves it alone. The app's copy is kept and put back on release.
+//!
 //! macOS / Windows (experimental): register VibeLauncher as the handler and
 //! re-assert it shortly after each launch, because the apps reclaim the scheme
 //! when they start.
@@ -124,6 +130,69 @@ mod imp {
         de::user_applications_dir().join(id)
     }
 
+    /// Keys an app puts in the user entry it writes for itself.
+    const APP_GENERATED_KEYS: &[&str] = &["X-Claude-Generated"];
+
+    /// Whether this user entry is one the app wrote for itself (so it may be
+    /// replaced, and put back later).
+    pub fn app_generated(e: &DesktopEntry) -> bool {
+        e.main("X-VibeLauncher").is_none()
+            && APP_GENERATED_KEYS.iter().any(|k| e.main(k).is_some_and(|v| v.trim().eq_ignore_ascii_case("true")))
+    }
+
+    /// Where the app's own user entry is kept while ours replaces it.
+    fn app_entry_backup(paths: &Paths, id: &str) -> PathBuf {
+        paths.state_dir.join(format!("app-entry-{id}"))
+    }
+
+    /// The app's system entry plus the launcher actions only its own user
+    /// entry has (e.g. "Continue Last Claude Code Session").
+    pub fn merge_app_actions(system_text: &str, app_text: &str) -> String {
+        let sys = DesktopEntry::parse(system_text);
+        let app = DesktopEntry::parse(app_text);
+        let have = sys.groups();
+        let mut out = sys.clone();
+        let mut ids: Vec<String> =
+            sys.main("Actions").unwrap_or_default().split(';').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+        let mut added = false;
+        for g in app.groups() {
+            let Some(id) = g.strip_prefix("Desktop Action ") else { continue };
+            if have.contains(&g) {
+                continue;
+            }
+            if out.lines.last().is_some_and(|l| !l.trim().is_empty()) {
+                out.lines.push(String::new());
+            }
+            out.lines.push(format!("[{g}]"));
+            out.lines.extend(group_lines(&app, &g));
+            if !ids.iter().any(|i| i == id) {
+                ids.push(id.to_string());
+            }
+            added = true;
+        }
+        if added {
+            out.set_raw("Desktop Entry", "Actions", &format!("{};", ids.join(";")));
+        }
+        out.to_text()
+    }
+
+    /// Non-empty lines of `group`, without its header.
+    fn group_lines(e: &DesktopEntry, group: &str) -> Vec<String> {
+        let mut cur = String::new();
+        let mut out = Vec::new();
+        for l in &e.lines {
+            let t = l.trim();
+            if t.starts_with('[') && t.ends_with(']') {
+                cur = t[1..t.len() - 1].to_string();
+                continue;
+            }
+            if cur == group && !t.is_empty() {
+                out.push(l.clone());
+            }
+        }
+        out
+    }
+
     fn hash(text: &str) -> String {
         let h = Sha256::digest(text.as_bytes());
         h.iter().take(12).map(|b| format!("{b:02x}")).collect()
@@ -134,8 +203,15 @@ mod imp {
     }
 
     /// Build the shadow entry from the app's own entry.
+    #[cfg(test)]
     pub fn render_shadow(provider: ProviderKind, source_text: &str, source_path: &str, self_exe: &str) -> String {
-        let mut entry = DesktopEntry::parse(source_text);
+        render(provider, source_text, source_text, source_path, self_exe)
+    }
+
+    /// `entry_text` is what the shadow is built from; `system_text` (the app's
+    /// system entry) is what it is checked against for staleness.
+    fn render(provider: ProviderKind, entry_text: &str, system_text: &str, source_path: &str, self_exe: &str) -> String {
+        let mut entry = DesktopEntry::parse(entry_text);
         let groups = entry.groups();
         let main_args = entry
             .exec_args("Desktop Entry")
@@ -162,9 +238,13 @@ mod imp {
         }
         // D-Bus activation would bypass Exec entirely.
         entry.remove("Desktop Entry", "DBusActivatable");
+        // Without the app's marker it leaves this entry alone.
+        for k in APP_GENERATED_KEYS {
+            entry.remove("Desktop Entry", k);
+        }
         entry.set_raw("Desktop Entry", "X-VibeLauncher", "true");
         entry.set_raw("Desktop Entry", "X-VibeLauncher-Source", &de::escape_string(source_path));
-        entry.set_raw("Desktop Entry", "X-VibeLauncher-Source-Hash", &hash(source_text));
+        entry.set_raw("Desktop Entry", "X-VibeLauncher-Source-Hash", &hash(system_text));
         let mut text = String::from(
             "# Generated by VibeLauncher so links reach the right profile.\n# Remove it (or turn routing off in VibeLauncher) to restore the original.\n",
         );
@@ -195,7 +275,7 @@ mod imp {
                 let ok_hash = e.main("X-VibeLauncher-Source-Hash").as_deref() == Some(hash(&src_text).as_str());
                 let ok_exe = e.main("Exec").is_some_and(|x| x.contains(&*self_exe.to_string_lossy()));
                 st.stale = !(ok_hash && ok_exe);
-            } else {
+            } else if !app_generated(&e) {
                 st.conflict = Some(format!("{} is a custom entry not made by VibeLauncher", shadow.display()));
             }
         }
@@ -207,19 +287,28 @@ mod imp {
         st
     }
 
-    pub fn claim(provider: ProviderKind, install: &AppInstall, _paths: &Paths) -> Result<()> {
+    pub fn claim(provider: ProviderKind, install: &AppInstall, paths: &Paths) -> Result<()> {
         let Some(id) = target_id(provider, Some(install)) else {
             bail!("no desktop entry found for {}; is it installed as a package?", provider.display_name())
         };
         let src = system_file(&id).context("the app's desktop entry disappeared")?;
         let shadow = shadow_path(&id);
+        let backup = app_entry_backup(paths, &id);
         if let Some(e) = de::read(&shadow) {
-            if e.main("X-VibeLauncher").is_none() {
+            if app_generated(&e) {
+                // The app's own copy: keep it to put back on release.
+                std::fs::create_dir_all(&paths.state_dir)?;
+                std::fs::copy(&shadow, &backup).with_context(|| format!("keeping a copy of {}", shadow.display()))?;
+            } else if e.main("X-VibeLauncher").is_none() {
                 bail!("{} already exists and was not made by VibeLauncher; not overwriting it", shadow.display());
             }
         }
         let text = std::fs::read_to_string(&src)?;
-        let out = render_shadow(provider, &text, &src.to_string_lossy(), &crate::paths::self_exe().to_string_lossy());
+        let entry_text = match std::fs::read_to_string(&backup) {
+            Ok(app) if app_generated(&DesktopEntry::parse(&app)) => merge_app_actions(&text, &app),
+            _ => text.clone(),
+        };
+        let out = render(provider, &entry_text, &text, &src.to_string_lossy(), &crate::paths::self_exe().to_string_lossy());
         crate::paths::write_atomic(&shadow, out.as_bytes())?;
         refresh_db();
         // Make sure the scheme still points at the app's id (normally it already does).
@@ -234,11 +323,24 @@ mod imp {
         Ok(())
     }
 
-    pub fn release(provider: ProviderKind, install: Option<&AppInstall>, _paths: &Paths) -> Result<()> {
+    pub fn release(provider: ProviderKind, install: Option<&AppInstall>, paths: &Paths) -> Result<()> {
         let Some(id) = target_id(provider, install) else { return Ok(()) };
         let shadow = shadow_path(&id);
+        let backup = app_entry_backup(paths, &id);
+        let mut changed = false;
         if de::read(&shadow).is_some_and(|e| e.main("X-VibeLauncher").is_some()) {
             std::fs::remove_file(&shadow)?;
+            changed = true;
+        }
+        if backup.exists() {
+            // Put the app's own entry back (it refreshes it on its next start).
+            if !shadow.exists() {
+                std::fs::copy(&backup, &shadow)?;
+                changed = true;
+            }
+            let _ = std::fs::remove_file(&backup);
+        }
+        if changed {
             refresh_db();
         }
         Ok(())
@@ -314,6 +416,26 @@ mod imp {
                 "{found:?}"
             );
             assert_eq!(found[0].desktop_id.as_deref(), Some("com.anthropic.Claude.desktop"));
+        }
+
+        #[test]
+        fn app_generated_entry_is_replaced_and_keeps_its_actions() {
+            let sys = "[Desktop Entry]\nName=Claude\nExec=claude-desktop %U\nMimeType=x-scheme-handler/claude;\nActions=NewChat;\n\n[Desktop Action NewChat]\nName=New Chat\nExec=claude-desktop \"claude://claude.ai/new\"\n";
+            let app = "[Desktop Entry]\nName=Claude\nExec=claude-desktop %U\nMimeType=x-scheme-handler/claude;\nTryExec=claude-desktop\nActions=NewChat;ContinueLast;\nX-Claude-Generated=true\n\n[Desktop Action NewChat]\nName=New Chat\nExec=claude-desktop \"claude://claude.ai/new\"\n\n[Desktop Action ContinueLast]\nName=Continue Last Claude Code Session\nExec=claude-desktop \"claude://code/continue?session=last\"\n";
+            assert!(app_generated(&DesktopEntry::parse(app)));
+            assert!(!app_generated(&DesktopEntry::parse(sys)));
+            let merged = merge_app_actions(sys, app);
+            let out = render(ProviderKind::Claude, &merged, sys, "/usr/share/applications/x.desktop", "/vl");
+            let e = DesktopEntry::parse(&out);
+            // Ours, not the app's: the app leaves it alone from now on.
+            assert!(e.main("X-Claude-Generated").is_none());
+            assert!(!app_generated(&e));
+            assert_eq!(e.main("Actions").as_deref(), Some("NewChat;ContinueLast;"));
+            let act = e.exec_args("Desktop Action ContinueLast").unwrap();
+            assert_eq!(act[0], "/bin/sh");
+            assert_eq!(act[4], "claude://code/continue?session=last");
+            // Checked against the system entry, so it isn't stale right away.
+            assert_eq!(e.main("X-VibeLauncher-Source-Hash"), Some(hash(sys)));
         }
 
         #[test]

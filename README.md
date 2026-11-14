@@ -146,6 +146,9 @@ signature and installs it the same way you installed VibeLauncher (with the deb 
 your system asks for your password). The AppImage replaces itself. Profiles, shortcuts and
 sign-in links are kept.
 
+Versions before 0.2.0 can't update themselves: install 0.2.0 or later once from the
+[releases page](https://github.com/Gloridust/VibeLauncher/releases/latest), over the old one.
+
 </details>
 
 <details>

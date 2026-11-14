@@ -121,6 +121,8 @@ VibeLauncher 不会接触你的密码或登录状态。每个配置都在官方�
 
 打开“设置”。有新版本时，点 **更新并重启**，它会下载新版本、校验签名，再按你当初的安装方式装好（deb 和 rpm 包会让系统要你输入密码，AppImage 直接替换自己）。配置、快捷方式和登录链接都会保留。
 
+0.2.0 之前的版本不能自己更新：从[发布页](https://github.com/Gloridust/VibeLauncher/releases/latest)下载 0.2.0 或更新的版本，覆盖安装一次即可。
+
 </details>
 
 <details>

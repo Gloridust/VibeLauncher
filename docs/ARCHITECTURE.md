@@ -414,7 +414,8 @@ docs/              本文档
 
 - **核心单元测试**（`cargo test -p vl-core -p vibelauncher`，CI 在三平台跑）：路由算法（标记过期、多实例、只有一个实例等）、配置读写、`.desktop` 解析与改写、asar 版本读取、命令行解析。
 - **端到端**（`crates/vibelauncher/tests/smoke.rs`，`--features smoke-test`，CI 在 Linux、macOS、Windows 的真机上跑）：用假应用 `vl-fake-app` 代替 Claude 和 ChatGPT（它记下自己拿到的参数和环境变量），走一遍新建配置 → 启动（检查 `--user-data-dir` 和 `CLAUDE_CONFIG_DIR`）→ 退出 → 模拟「更新后丢了环境变量」被诊断发现并修复 → 登录链接转交 → 接管链接 → **由系统本身**（`gio open` / `open` / `start`）打开一个 `claude://` 链接，确认它经 VibeLauncher 到了发起登录的配置 → 交还链接；再对 ChatGPT 走一遍（第二个假应用，检查 `--user-data-dir`、`CODEX_ELECTRON_USER_DATA_PATH`、`CODEX_HOME`，`codex://` 转交、由系统打开、交还）→ 删除配置。`VL_SMOKE=sandbox` 把一切放在临时目录里，本机也能跑；`VL_SMOKE=ci` 用真实的用户目录，只在 CI 的一次性机器上用。
-- **真实窗口**（逐项点击目前只在 Linux 上手动走过；macOS、Windows 上由 CI 的 Window 工作流打开窗口、确认不退出并截图，见 `.github/scripts/window-check.sh`）：用私有 `VIBELAUNCHER_HOME` 和 `XDG_*` 目录，在 Xvfb 上用私有 D-Bus 会话启动 `vibelauncher-gui`，放进限内存的 `systemd-run --user --scope`，用 `xdotool` 点击、`import` 截图，把每个流程走一遍（新建、登录并粘贴链接、打开、退出、编辑、删除正在运行的配置、诊断与修复、设置里切中文和深色、键盘操作）。不会碰系统里真正的链接处理程序和应用菜单。
+- **真实窗口，CI**：Window 工作流在 macOS、Windows 上打开窗口截图，再用内置的点击测试（`app/src/selftest.ts`，只在 `VITE_SELFTEST=1` + `selftest` 特性的构建里有，且要设 `VL_SELFTEST_OUT` 才运行）按真人的方式点按钮、填字段：新建、打开、退出、粘贴链接登录、改名、诊断、切中文和深色、删除；脚本再用命令行核对结果（配置已删、设置已存、链接到了该配置）。见 `.github/scripts/window-check.sh`，它在 Linux 上也能跑（Xvfb + 私有 `XDG_*`）。
+- **真实窗口，手动**（Linux）：用私有 `VIBELAUNCHER_HOME` 和 `XDG_*` 目录，在 Xvfb 上用私有 D-Bus 会话启动 `vibelauncher-gui`，放进限内存的 `systemd-run --user --scope`，用 `xdotool` 点击、`import` 截图，把每个流程走一遍（新建、登录并粘贴链接、打开、退出、编辑、删除正在运行的配置、诊断与修复、设置里切中文和深色、键盘操作）。不会碰系统里真正的链接处理程序和应用菜单。
 - **界面**：`pnpm dev` 下用假的后端（`app/src/mock.ts`，只在开发模式加载），`?scenario=busy|fresh|noapps|route`、`&lang=zh`、`&theme=dark`、`&platform=macos` 覆盖各种状态。
 - **打包**：`release.yml` 在改动打包配置的 PR 上也会跑，四个目标（Linux x86_64、Windows x86_64、macOS Apple 芯片和 Intel）都要打包成功。
 - 还没做：macOS、Windows 上用**真正的 Claude** 登录（CI 上没有账号，只能用假应用）；对官方新版本自动跑一遍第 2 节实验的兼容性脚本。

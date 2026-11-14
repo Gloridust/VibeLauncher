@@ -33,3 +33,5 @@ app/src-tauri/binaries/
 
 # Local editor/agent config
 .claude/
+# .github/scripts/window-check.sh output
+window-shots/

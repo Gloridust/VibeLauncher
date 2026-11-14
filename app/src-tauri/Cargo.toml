@@ -24,5 +24,10 @@ anyhow = "1"
 url = "2"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
+[features]
+# The click-through test in CI: lets the page write its results to
+# $VL_SELFTEST_OUT. Pair with VITE_SELFTEST=1 when building the page.
+selftest = []
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -192,6 +192,22 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
     })
 }
 
+/// The click-through test reports here (only with the `selftest` feature).
+/// Returns whether anyone is listening; the test doesn't run otherwise.
+#[tauri::command]
+fn selftest_report(line: String) -> bool {
+    #[cfg(feature = "selftest")]
+    if let Some(path) = std::env::var_os("VL_SELFTEST_OUT") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "{line}");
+        }
+        return true;
+    }
+    let _ = line;
+    false
+}
+
 fn chrono_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -488,6 +504,7 @@ pub fn run(args: Vec<String>) {
             reveal,
             open_website,
             opened_for_route,
+            selftest_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VibeLauncher");

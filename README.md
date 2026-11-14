@@ -51,9 +51,10 @@ On every change, CI runs the whole command-line flow on all three systems, for b
 stand-ins for them: it creates profiles, launches, checks each profile is recognised, quits every
 copy, catches an instance that lost its settings, and has the system itself deliver a sign-in link
 (`claude://`, `codex://`) through VibeLauncher. On macOS and Windows it also opens the manager
-window (English and light, then Chinese and dark) and keeps screenshots. What CI can't check is a
-real sign-in with the real apps, or clicking through the window there; that has only been done by
-hand on Linux. Reports are very welcome — please
+window, keeps screenshots (English and light, Chinese and dark), and clicks through it: create a
+profile, open and quit it, sign in by pasting a link, rename it, run Diagnostics, switch language
+and theme, delete it. What CI can't check is a real sign-in with the real apps. Reports are very
+welcome — please
 [open an issue](https://github.com/Gloridust/VibeLauncher/issues).
 
 ## Install
@@ -190,6 +191,6 @@ VibeLauncher 让官方 Claude 和 ChatGPT 桌面版拥有多个**互相独立的
 
 **已知限制**：Claude 的 Cowork 虚拟机属于系统账户而不是配置，同一时间只有一个配置能用；部分全局开关（如文件管理器里的“用 Claude 打开”）是共享的；终端里的 `codex` 命令仍使用默认账号（`~/.codex`）；它依赖官方应用目前的行为，若更新改变了这些行为，“诊断”会提示。
 
-macOS 和 Windows 上，CI 每次改动都会用替身应用为 Claude 和 ChatGPT 跑通命令行的完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交 `claude://` / `codex://` 登录链接），并打开管理窗口（英文浅色、中文深色各一次）留下截图；但还没有用真实账号登录过，也只在 Linux 上手动把窗口里的操作点过一遍。欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
+macOS 和 Windows 上，CI 每次改动都会用替身应用为 Claude 和 ChatGPT 跑通命令行的完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交 `claude://` / `codex://` 登录链接），并打开管理窗口留下截图（英文浅色、中文深色），再在窗口里把操作点一遍（新建、打开、退出、粘贴链接登录、改名、诊断、切换语言和外观、删除）；但还没有用真实账号登录过。欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
 
 本项目与 Anthropic、OpenAI 无关。

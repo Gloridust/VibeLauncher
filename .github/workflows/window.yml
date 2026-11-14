@@ -1,7 +1,8 @@
 name: Window
 
-# Opens the real manager window on macOS and Windows and keeps screenshots,
-# so the window is checked on systems nobody here uses day to day.
+# Opens the real manager window on macOS and Windows, keeps screenshots, and
+# clicks through it (app/src/selftest.ts), so the window is checked on systems
+# nobody here uses day to day.
 on:
   push:
     branches: [main]
@@ -40,12 +41,14 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build the command and a stand-in app
         run: cargo build --release --locked -p vibelauncher --features vibelauncher/smoke-test
-      - name: Build the window
+      - name: Build the window, with the click-through test
         working-directory: app
-        run: pnpm tauri build --no-bundle
-      - name: Open the window and take screenshots
+        env:
+          VITE_SELFTEST: "1"
+        run: pnpm tauri build --no-bundle --features selftest
+      - name: Open the window, take screenshots and click through it
         shell: bash
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: bash .github/scripts/window-check.sh
       - uses: actions/upload-artifact@v4
         if: always()

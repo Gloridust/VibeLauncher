@@ -91,9 +91,7 @@ impl AppInstall {
 
     fn fill_version_and_icon(&mut self) {
         if self.version.is_none() {
-            self.version = self
-                .resources_dir()
-                .and_then(|r| asar_package_version(&r.join("app.asar")));
+            self.version = self.resources_dir().and_then(|r| asar_package_version(&r.join("app.asar")));
         }
         if self.icon.is_none() {
             if let Some(r) = self.resources_dir() {
@@ -280,16 +278,10 @@ pub fn linux_icon(name: &str) -> Option<PathBuf> {
     let mut best: Option<(u32, PathBuf)> = None;
     for dir in crate::desktop_entry::xdg_data_dirs() {
         let theme = dir.join("icons/hicolor");
-        let Ok(rd) = std::fs::read_dir(&theme) else {
-            continue;
-        };
+        let Ok(rd) = std::fs::read_dir(&theme) else { continue };
         for size_dir in rd.flatten() {
             let size_name = size_dir.file_name().to_string_lossy().into_owned();
-            let size: u32 = size_name
-                .split('x')
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            let size: u32 = size_name.split('x').next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let cand = size_dir.path().join("apps").join(format!("{name}.png"));
             if cand.is_file() && best.as_ref().is_none_or(|(s, _)| size > *s) {
                 best = Some((size, cand));
@@ -313,9 +305,7 @@ fn platform_installs(provider: ProviderKind) -> Vec<AppInstall> {
     let mut files: Vec<PathBuf> = Vec::new();
     for id in provider.linux_desktop_ids() {
         for f in de::find_by_id(id) {
-            if de::read(&f).is_some_and(|e| e.main("X-VibeLauncher").is_none())
-                && !files.contains(&f)
-            {
+            if de::read(&f).is_some_and(|e| e.main("X-VibeLauncher").is_none()) && !files.contains(&f) {
                 files.push(f);
             }
         }
@@ -397,10 +387,7 @@ pub mod macos {
         }
         // Prefer /Applications over copies inside DMGs or Downloads.
         bundles.sort_by_key(|b| !b.starts_with("/Applications"));
-        bundles
-            .iter()
-            .filter_map(|b| from_bundle(provider, b, "Launch Services"))
-            .collect()
+        bundles.iter().filter_map(|b| from_bundle(provider, b, "Launch Services")).collect()
     }
 
     pub fn plist_value(bundle: &Path, key: &str) -> Option<String> {
@@ -409,9 +396,7 @@ pub mod macos {
             .arg(bundle.join("Contents/Info.plist"))
             .output()
             .ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
     pub fn from_bundle(provider: ProviderKind, bundle: &Path, source: &str) -> Option<AppInstall> {
@@ -444,20 +429,11 @@ pub mod windows {
 
     pub fn powershell(script: &str) -> Option<String> {
         let out = Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                script,
-            ])
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
     fn find_exe(dir: &Path, names: &[&str], depth: u32) -> Option<PathBuf> {
@@ -476,22 +452,13 @@ pub mod windows {
         if depth == 0 {
             return None;
         }
-        subdirs
-            .into_iter()
-            .find_map(|d| find_exe(&d, names, depth - 1))
+        subdirs.into_iter().find_map(|d| find_exe(&d, names, depth - 1))
     }
 
     fn largest_png(dir: &Path) -> Option<PathBuf> {
         let mut best: Option<(u64, PathBuf)> = None;
-        for sub in [
-            dir.join("assets"),
-            dir.join("Assets"),
-            dir.join("images"),
-            dir.to_path_buf(),
-        ] {
-            let Ok(rd) = std::fs::read_dir(&sub) else {
-                continue;
-            };
+        for sub in [dir.join("assets"), dir.join("Assets"), dir.join("images"), dir.to_path_buf()] {
+            let Ok(rd) = std::fs::read_dir(&sub) else { continue };
             for e in rd.flatten() {
                 let p = e.path();
                 let n = e.file_name().to_string_lossy().to_lowercase();
@@ -520,17 +487,14 @@ pub mod windows {
             "Get-AppxPackage | Where-Object {{ ({filter}) -and $_.SignatureKind -ne 'System' }} | Select-Object Name,InstallLocation,Version | ConvertTo-Json -Compress"
         );
         if let Some(json) = powershell(&script) {
-            let v: serde_json::Value =
-                serde_json::from_str(json.trim()).unwrap_or(serde_json::Value::Null);
+            let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap_or(serde_json::Value::Null);
             let items = match v {
                 serde_json::Value::Array(a) => a,
                 serde_json::Value::Null => vec![],
                 o => vec![o],
             };
             for it in items {
-                let Some(loc) = it.get("InstallLocation").and_then(|x| x.as_str()) else {
-                    continue;
-                };
+                let Some(loc) = it.get("InstallLocation").and_then(|x| x.as_str()) else { continue };
                 let dir = PathBuf::from(loc);
                 if let Some(exe) = find_exe(&dir, provider.windows_exe_names(), 3) {
                     let mut i = AppInstall::new(provider, exe, "MSIX package");
@@ -557,12 +521,7 @@ pub mod windows {
         // 3. Whatever the URL scheme points at.
         for scheme in provider.schemes() {
             if let Some(exe) = crate::scheme::windows_registered_exe(scheme) {
-                if exe.is_file()
-                    && !exe
-                        .to_string_lossy()
-                        .to_lowercase()
-                        .contains("vibelauncher")
-                {
+                if exe.is_file() && !exe.to_string_lossy().to_lowercase().contains("vibelauncher") {
                     out.push(AppInstall::new(provider, exe, "URL handler"));
                 }
             }
@@ -579,10 +538,7 @@ mod tests {
     fn asar_version_reader() {
         // Build a tiny asar: [4][hdr_size][json_len+4][json_len] json body
         let body = br#"{"name":"x","version":"1.2.3"}"#;
-        let json = format!(
-            r#"{{"files":{{"package.json":{{"size":{},"offset":"0"}}}}}}"#,
-            body.len()
-        );
+        let json = format!(r#"{{"files":{{"package.json":{{"size":{},"offset":"0"}}}}}}"#, body.len());
         let jl = json.len() as u32;
         let pad = (4 - (jl % 4)) % 4;
         let hdr = 4 + 4 + jl + pad;

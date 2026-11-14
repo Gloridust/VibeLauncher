@@ -11,27 +11,18 @@ fn main() {
     let exe0 = std::env::current_exe().expect("own path");
     let dir0 = exe0.parent().expect("own folder").to_path_buf();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = std::fs::write(
-            dir0.join(format!("fake-app-panic-{}.txt", std::process::id())),
-            info.to_string(),
-        );
+        let _ = std::fs::write(dir0.join(format!("fake-app-panic-{}.txt", std::process::id())), info.to_string());
     }));
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exe = std::env::current_exe().expect("own path");
     let dir = exe.parent().expect("own folder").to_path_buf();
     let mut env = serde_json::Map::new();
-    for k in [
-        "CLAUDE_CONFIG_DIR",
-        "CODEX_HOME",
-        "CODEX_ELECTRON_USER_DATA_PATH",
-    ] {
+    for k in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CODEX_ELECTRON_USER_DATA_PATH"] {
         if let Ok(v) = std::env::var(k) {
             env.insert(k.into(), v.into());
         }
     }
-    let line = serde_json::json!({ "pid": std::process::id(), "args": args, "env": env })
-        .to_string()
-        + "\n";
+    let line = serde_json::json!({ "pid": std::process::id(), "args": args, "env": env }).to_string() + "\n";
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -53,8 +44,5 @@ fn main() {
         n += 1;
         std::thread::sleep(Duration::from_millis(200));
     }
-    let _ = std::fs::write(
-        &beat,
-        format!("{} (stopped normally)", start.elapsed().as_secs()),
-    );
+    let _ = std::fs::write(&beat, format!("{} (stopped normally)", start.elapsed().as_secs()));
 }

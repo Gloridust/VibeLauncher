@@ -64,25 +64,15 @@ impl ProviderKind {
     }
 
     pub fn from_scheme(scheme: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|p| p.schemes().iter().any(|s| s.eq_ignore_ascii_case(scheme)))
+        Self::ALL.into_iter().find(|p| p.schemes().iter().any(|s| s.eq_ignore_ascii_case(scheme)))
     }
 
     /// Desktop entry ids the official Linux packages ship, most specific first.
     pub fn linux_desktop_ids(self) -> &'static [&'static str] {
         match self {
             // Official deb, and the community packages (aaddrick, patrickjaja).
-            Self::Claude => &[
-                "com.anthropic.Claude.desktop",
-                "claude-desktop.desktop",
-                "claude-desktop-bin.desktop",
-            ],
-            Self::ChatGpt => &[
-                "chatgpt.desktop",
-                "com.openai.chat.desktop",
-                "codex.desktop",
-            ],
+            Self::Claude => &["com.anthropic.Claude.desktop", "claude-desktop.desktop", "claude-desktop-bin.desktop"],
+            Self::ChatGpt => &["chatgpt.desktop", "com.openai.chat.desktop", "codex.desktop"],
         }
     }
 
@@ -95,11 +85,7 @@ impl ProviderKind {
                 "/opt/claude-desktop/claude-desktop",
                 "/usr/bin/claude-desktop",
             ],
-            Self::ChatGpt => &[
-                "/usr/lib/chatgpt/ChatGPT",
-                "/opt/ChatGPT/ChatGPT",
-                "/usr/bin/chatgpt",
-            ],
+            Self::ChatGpt => &["/usr/lib/chatgpt/ChatGPT", "/opt/ChatGPT/ChatGPT", "/usr/bin/chatgpt"],
         }
     }
 
@@ -153,10 +139,7 @@ impl ProviderKind {
     pub fn isolation_env(self, root: &Path) -> Vec<(String, String)> {
         let electron = electron_dir(root);
         match self {
-            Self::Claude => vec![(
-                "CLAUDE_CONFIG_DIR".into(),
-                path_str(&root.join("claude-config")),
-            )],
+            Self::Claude => vec![("CLAUDE_CONFIG_DIR".into(), path_str(&root.join("claude-config")))],
             Self::ChatGpt => vec![
                 ("CODEX_ELECTRON_USER_DATA_PATH".into(), path_str(&electron)),
                 ("CODEX_HOME".into(), path_str(&root.join("codex-home"))),
@@ -194,11 +177,7 @@ impl ProviderKind {
 
     pub fn is_login_url(self, url: &url::Url) -> bool {
         let hay = format!("{}{}", url.host_str().unwrap_or(""), url.path()).to_ascii_lowercase();
-        [
-            "login", "auth", "callback", "oauth", "magic", "sso", "verify",
-        ]
-        .iter()
-        .any(|k| hay.contains(k))
+        ["login", "auth", "callback", "oauth", "magic", "sso", "verify"].iter().any(|k| hay.contains(k))
     }
 }
 
@@ -225,9 +204,7 @@ pub struct LaunchSpec {
 
 /// The `--user-data-dir` a profile runs with, if isolated.
 pub fn profile_user_data_dir(profile: &Profile, paths: &Paths) -> Option<PathBuf> {
-    profile
-        .isolated
-        .then(|| electron_dir(&profile.data_root(paths)))
+    profile.isolated.then(|| electron_dir(&profile.data_root(paths)))
 }
 
 pub fn build_launch_spec(
@@ -263,11 +240,7 @@ pub fn build_launch_spec(
         program: program.to_path_buf(),
         args,
         set_env,
-        remove_env: provider
-            .scrub_env(profile.isolated)
-            .into_iter()
-            .map(String::from)
-            .collect(),
+        remove_env: provider.scrub_env(profile.isolated).into_iter().map(String::from).collect(),
         bundle: bundle.map(Path::to_path_buf),
         mkdirs,
     }
@@ -285,23 +258,13 @@ mod tests {
         p.id = "work".into();
         p.isolated = true;
         p.env.insert("FOO".into(), "bar".into());
-        let s = build_launch_spec(
-            &p,
-            &paths,
-            Path::new("/usr/bin/claude-desktop"),
-            &[],
-            None,
-            Some("claude://x"),
-        );
+        let s = build_launch_spec(&p, &paths, Path::new("/usr/bin/claude-desktop"), &[], None, Some("claude://x"));
         let root = Path::new("/tmp/vl").join("profiles").join("work");
         let mut udd = OsString::from("--user-data-dir=");
         udd.push(root.join("electron"));
         assert_eq!(s.args[0], udd);
         assert_eq!(s.args.last().unwrap(), &OsString::from("claude://x"));
-        assert!(s.set_env.contains(&(
-            "CLAUDE_CONFIG_DIR".into(),
-            root.join("claude-config").to_string_lossy().into_owned()
-        )));
+        assert!(s.set_env.contains(&("CLAUDE_CONFIG_DIR".into(), root.join("claude-config").to_string_lossy().into_owned())));
         assert!(s.set_env.contains(&("FOO".into(), "bar".into())));
         assert!(s.remove_env.contains(&"CLAUDE_USER_DATA_DIR".to_string()));
     }

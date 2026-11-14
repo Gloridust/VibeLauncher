@@ -40,13 +40,7 @@ pub fn display_name(p: &Profile) -> String {
 fn safe_file_name(s: &str) -> String {
     let v: String = s
         .chars()
-        .map(|c| {
-            if "/\\:*?\"<>|".contains(c) || c.is_control() {
-                '-'
-            } else {
-                c
-            }
-        })
+        .map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '-' } else { c })
         .collect();
     v.trim().trim_matches('.').to_string()
 }
@@ -58,12 +52,7 @@ pub fn shortcut_path(p: &Profile) -> PathBuf {
 pub fn state(p: &Profile) -> ShortcutState {
     let path = shortcut_path(p);
     let exists = path.exists();
-    ShortcutState {
-        profile_id: p.id.clone(),
-        stale: exists && imp::is_stale(&path),
-        path,
-        exists,
-    }
+    ShortcutState { profile_id: p.id.clone(), stale: exists && imp::is_stale(&path), path, exists }
 }
 
 pub fn create(paths: &Paths, install: Option<&AppInstall>, p: &Profile) -> Result<PathBuf> {
@@ -77,18 +66,9 @@ pub fn remove(p: &Profile) -> Result<()> {
 
 /// Make the shortcuts match the config: create/refresh wanted ones, remove
 /// ones for deleted profiles or with `shortcut = false`. Returns problems.
-pub fn sync(
-    paths: &Paths,
-    cfg: &Config,
-    installs: &dyn Fn(crate::provider::ProviderKind) -> Option<AppInstall>,
-) -> Vec<String> {
+pub fn sync(paths: &Paths, cfg: &Config, installs: &dyn Fn(crate::provider::ProviderKind) -> Option<AppInstall>) -> Vec<String> {
     let mut errors = Vec::new();
-    let wanted: Vec<PathBuf> = cfg
-        .profiles
-        .iter()
-        .filter(|p| p.shortcut)
-        .map(shortcut_path)
-        .collect();
+    let wanted: Vec<PathBuf> = cfg.profiles.iter().filter(|p| p.shortcut).map(shortcut_path).collect();
     for p in &cfg.profiles {
         if p.shortcut {
             if let Err(e) = create(paths, installs(p.provider).as_ref(), p) {
@@ -149,14 +129,11 @@ mod imp {
 
     pub fn all_ours() -> Vec<PathBuf> {
         let dir = de::user_applications_dir();
-        let Ok(rd) = std::fs::read_dir(&dir) else {
-            return vec![];
-        };
+        let Ok(rd) = std::fs::read_dir(&dir) else { return vec![] };
         rd.filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with("vibelauncher-"))
+                p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("vibelauncher-"))
                     && de::read(p).is_some_and(|e| e.main("X-VibeLauncher-Profile").is_some())
             })
             .collect()
@@ -178,20 +155,12 @@ mod imp {
             p.id = "work".into();
             p.name = "Work".into();
             p.isolated = true;
-            let t = render(
-                &p,
-                Path::new("/x/work.png"),
-                "/opt/Vibe Launcher/vibelauncher",
-            );
+            let t = render(&p, Path::new("/x/work.png"), "/opt/Vibe Launcher/vibelauncher");
             let e = DesktopEntry::parse(&t);
             assert_eq!(e.main("Name").as_deref(), Some("Claude · Work"));
             assert_eq!(
                 e.exec_args("Desktop Entry").unwrap(),
-                vec![
-                    "/opt/Vibe Launcher/vibelauncher".to_string(),
-                    "launch".into(),
-                    "work".into()
-                ]
+                vec!["/opt/Vibe Launcher/vibelauncher".to_string(), "launch".into(), "work".into()]
             );
         }
     }
@@ -225,73 +194,39 @@ mod imp {
         }
         let app = shortcut_path(p);
         std::fs::create_dir_all(dir())?;
-        let exe = crate::paths::self_exe()
-            .to_string_lossy()
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"");
+        let exe = crate::paths::self_exe().to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
         let script = format!(
             "on run\n  do shell script quoted form of \"{exe}\" & \" launch {id} > /dev/null 2>&1 &\"\nend run\n",
             id = p.id
         );
-        let src = paths
-            .state_dir
-            .join(format!("shortcut-{}.applescript", p.id));
+        let src = paths.state_dir.join(format!("shortcut-{}.applescript", p.id));
         crate::paths::write_atomic(&src, script.as_bytes())?;
         let _ = std::fs::remove_dir_all(&app);
-        if !Command::new("/usr/bin/osacompile")
-            .arg("-o")
-            .arg(&app)
-            .arg(&src)
-            .status()?
-            .success()
-        {
+        if !Command::new("/usr/bin/osacompile").arg("-o").arg(&app).arg(&src).status()?.success() {
             anyhow::bail!("osacompile failed");
         }
         std::fs::copy(icon, app.join("Contents/Resources/applet.icns"))?;
         let _ = std::fs::remove_file(app.join("Contents/Resources/Assets.car"));
         let plist = app.join("Contents/Info.plist");
-        let plutil = |args: &[&str]| {
-            Command::new("/usr/bin/plutil")
-                .args(args)
-                .arg(&plist)
-                .status()
-        };
-        plutil(&[
-            "-replace",
-            "CFBundleIdentifier",
-            "-string",
-            &format!("io.github.gloridust.vibelauncher.profile.{}", p.id),
-        ])?;
+        let plutil = |args: &[&str]| Command::new("/usr/bin/plutil").args(args).arg(&plist).status();
+        plutil(&["-replace", "CFBundleIdentifier", "-string", &format!("io.github.gloridust.vibelauncher.profile.{}", p.id)])?;
         plutil(&["-replace", "CFBundleName", "-string", &display_name(p)])?;
         plutil(&["-remove", "CFBundleIconName"])?;
         std::fs::write(marker(&app), &p.id)?;
-        std::fs::write(
-            app.join("Contents/Resources/vibelauncher-exe"),
-            crate::paths::self_exe().to_string_lossy().as_bytes(),
-        )?;
-        let _ = Command::new("/usr/bin/codesign")
-            .args(["--force", "--sign", "-"])
-            .arg(&app)
-            .status();
+        std::fs::write(app.join("Contents/Resources/vibelauncher-exe"), crate::paths::self_exe().to_string_lossy().as_bytes())?;
+        let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&app).status();
         let _ = Command::new("/usr/bin/touch").arg(&app).status();
         Ok(app)
     }
 
     pub fn is_stale(app: &Path) -> bool {
-        std::fs::read_to_string(app.join("Contents/Resources/vibelauncher-exe"))
-            .ok()
-            .as_deref()
+        std::fs::read_to_string(app.join("Contents/Resources/vibelauncher-exe")).ok().as_deref()
             != Some(&*crate::paths::self_exe().to_string_lossy())
     }
 
     pub fn all_ours() -> Vec<PathBuf> {
-        let Ok(rd) = std::fs::read_dir(dir()) else {
-            return vec![];
-        };
-        rd.filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| marker(p).is_file())
-            .collect()
+        let Ok(rd) = std::fs::read_dir(dir()) else { return vec![] };
+        rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| marker(p).is_file()).collect()
     }
 
     pub fn remove_path(path: &Path) -> Result<()> {
@@ -309,9 +244,7 @@ mod imp {
     use super::*;
 
     fn dir() -> PathBuf {
-        let appdata = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(crate::paths::home_dir);
+        let appdata = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(crate::paths::home_dir);
         appdata.join("Microsoft\\Windows\\Start Menu\\Programs\\VibeLauncher")
     }
 
@@ -327,11 +260,7 @@ mod imp {
         std::fs::create_dir_all(dir())?;
         // Remove an old shortcut for this profile (renamed profile).
         let idx = index(&dir());
-        let mut lines: Vec<String> = std::fs::read_to_string(&idx)
-            .unwrap_or_default()
-            .lines()
-            .map(String::from)
-            .collect();
+        let mut lines: Vec<String> = std::fs::read_to_string(&idx).unwrap_or_default().lines().map(String::from).collect();
         lines.retain(|l| match l.split_once('\t') {
             Some((id, file)) if id == p.id => {
                 let _ = std::fs::remove_file(dir().join(file));
@@ -344,28 +273,16 @@ mod imp {
         let mut sl = mslnk::ShellLink::new(&exe)?;
         sl.set_arguments(Some(format!("launch {}", p.id)));
         sl.set_icon_location(Some(icon.to_string_lossy().into_owned()));
-        sl.set_name(Some(format!(
-            "Open {} with the “{}” profile",
-            p.provider.display_name(),
-            p.name
-        )));
+        sl.set_name(Some(format!("Open {} with the “{}” profile", p.provider.display_name(), p.name)));
         sl.create_lnk(&path)?;
-        lines.push(format!(
-            "{}\t{}\t{}",
-            p.id,
-            path.file_name().unwrap().to_string_lossy(),
-            exe.display()
-        ));
+        lines.push(format!("{}\t{}\t{}", p.id, path.file_name().unwrap().to_string_lossy(), exe.display()));
         std::fs::write(&idx, lines.join("\n"))?;
         Ok(path)
     }
 
     pub fn is_stale(path: &Path) -> bool {
         let exe = crate::paths::self_exe().display().to_string();
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         !std::fs::read_to_string(index(&dir()))
             .unwrap_or_default()
             .lines()
@@ -388,16 +305,10 @@ mod imp {
         if path.exists() {
             std::fs::remove_file(path)?;
         }
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let idx = index(&dir());
         if let Ok(text) = std::fs::read_to_string(&idx) {
-            let kept: Vec<&str> = text
-                .lines()
-                .filter(|l| l.split('\t').nth(1) != Some(name.as_str()))
-                .collect();
+            let kept: Vec<&str> = text.lines().filter(|l| l.split('\t').nth(1) != Some(name.as_str())).collect();
             std::fs::write(&idx, kept.join("\n"))?;
         }
         Ok(())

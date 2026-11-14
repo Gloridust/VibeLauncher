@@ -71,27 +71,17 @@ pub fn decide(
     // 1. A fresh pending-login marker wins.
     if let Some(p) = pending
         .iter()
-        .filter(|p| {
-            p.provider == provider
-                && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS)
-                && p.created_at <= now + Duration::seconds(5)
-        })
+        .filter(|p| p.provider == provider && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS) && p.created_at <= now + Duration::seconds(5))
         .max_by_key(|p| p.created_at)
     {
         if exists(&p.profile) {
-            return Decision::To {
-                profile: p.profile.clone(),
-                reason: Reason::PendingLogin,
-            };
+            return Decision::To { profile: p.profile.clone(), reason: Reason::PendingLogin };
         }
     }
     let running: Vec<&Candidate> = candidates.iter().filter(|c| c.running).collect();
     // 2. Exactly one instance running: it must be the one.
     if running.len() == 1 {
-        return Decision::To {
-            profile: running[0].id.clone(),
-            reason: Reason::OnlyRunning,
-        };
+        return Decision::To { profile: running[0].id.clone(), reason: Reason::OnlyRunning };
     }
     let most_recent = |set: &[&Candidate]| -> Option<String> {
         set.iter()
@@ -102,33 +92,20 @@ pub fn decide(
     // 3. Several running.
     if running.len() > 1 {
         if is_login {
-            return Decision::Ask {
-                candidates: running.iter().map(|c| c.id.clone()).collect(),
-            };
+            return Decision::Ask { candidates: running.iter().map(|c| c.id.clone()).collect() };
         }
         let id = most_recent(&running).unwrap_or_else(|| running[0].id.clone());
-        return Decision::To {
-            profile: id,
-            reason: Reason::MostRecent,
-        };
+        return Decision::To { profile: id, reason: Reason::MostRecent };
     }
     // 4. Nothing running.
     let all: Vec<&Candidate> = candidates.iter().collect();
     if is_login && candidates.len() > 1 {
-        return Decision::Ask {
-            candidates: candidates.iter().map(|c| c.id.clone()).collect(),
-        };
+        return Decision::Ask { candidates: candidates.iter().map(|c| c.id.clone()).collect() };
     }
     if let Some(id) = most_recent(&all) {
-        return Decision::To {
-            profile: id,
-            reason: Reason::MostRecent,
-        };
+        return Decision::To { profile: id, reason: Reason::MostRecent };
     }
-    Decision::To {
-        profile: provider.default_profile_id().into(),
-        reason: Reason::Default,
-    }
+    Decision::To { profile: provider.default_profile_id().into(), reason: Reason::Default }
 }
 
 pub struct PendingStore {
@@ -138,10 +115,7 @@ pub struct PendingStore {
 
 impl PendingStore {
     pub fn new(paths: &Paths) -> Self {
-        Self {
-            file: paths.state_dir.join("pending-login.json"),
-            log: paths.state_dir.join("router.log"),
-        }
+        Self { file: paths.state_dir.join("pending-login.json"), log: paths.state_dir.join("router.log") }
     }
 
     pub fn load(&self) -> Vec<Pending> {
@@ -160,25 +134,15 @@ impl PendingStore {
         let mut v: Vec<Pending> = self
             .load()
             .into_iter()
-            .filter(|p| {
-                p.provider != provider && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS)
-            })
+            .filter(|p| p.provider != provider && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS))
             .collect();
-        v.push(Pending {
-            provider,
-            profile: profile.into(),
-            created_at: now,
-        });
+        v.push(Pending { provider, profile: profile.into(), created_at: now });
         self.save(&v)
     }
 
     /// Remove the marker for `provider` (it is single-use).
     pub fn consume(&self, provider: ProviderKind) -> Result<()> {
-        let v: Vec<Pending> = self
-            .load()
-            .into_iter()
-            .filter(|p| p.provider != provider)
-            .collect();
+        let v: Vec<Pending> = self.load().into_iter().filter(|p| p.provider != provider).collect();
         self.save(&v)
     }
 
@@ -186,9 +150,7 @@ impl PendingStore {
         let now = Utc::now();
         self.load()
             .into_iter()
-            .filter(|p| {
-                p.provider == provider && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS)
-            })
+            .filter(|p| p.provider == provider && now - p.created_at <= Duration::seconds(PENDING_TTL_SECS))
             .max_by_key(|p| p.created_at)
     }
 
@@ -201,11 +163,7 @@ impl PendingStore {
                 let _ = std::fs::rename(&self.log, self.log.with_extension("log.1"));
             }
         }
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.log)
-        {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.log) {
             let _ = writeln!(f, "{} {}", Utc::now().format("%Y-%m-%dT%H:%M:%SZ"), line);
         }
     }
@@ -239,110 +197,53 @@ mod tests {
     use super::*;
 
     fn c(id: &str, running: bool, mins_ago: Option<i64>) -> Candidate {
-        Candidate {
-            id: id.into(),
-            running,
-            last_launched_at: mins_ago.map(|m| Utc::now() - Duration::minutes(m)),
-        }
+        Candidate { id: id.into(), running, last_launched_at: mins_ago.map(|m| Utc::now() - Duration::minutes(m)) }
     }
     const P: ProviderKind = ProviderKind::Claude;
 
     #[test]
     fn pending_wins() {
         let now = Utc::now();
-        let pend = vec![Pending {
-            provider: P,
-            profile: "work".into(),
-            created_at: now - Duration::seconds(30),
-        }];
-        let cands = [
-            c("claude-default", true, Some(1)),
-            c("work", true, Some(50)),
-        ];
-        assert_eq!(
-            decide(P, true, &pend, &cands, now),
-            Decision::To {
-                profile: "work".into(),
-                reason: Reason::PendingLogin
-            }
-        );
+        let pend = vec![Pending { provider: P, profile: "work".into(), created_at: now - Duration::seconds(30) }];
+        let cands = [c("claude-default", true, Some(1)), c("work", true, Some(50))];
+        assert_eq!(decide(P, true, &pend, &cands, now), Decision::To { profile: "work".into(), reason: Reason::PendingLogin });
     }
 
     #[test]
     fn expired_pending_ignored() {
         let now = Utc::now();
-        let pend = vec![Pending {
-            provider: P,
-            profile: "work".into(),
-            created_at: now - Duration::seconds(400),
-        }];
+        let pend = vec![Pending { provider: P, profile: "work".into(), created_at: now - Duration::seconds(400) }];
         let cands = [c("claude-default", true, Some(1)), c("work", false, None)];
-        assert_eq!(
-            decide(P, true, &pend, &cands, now),
-            Decision::To {
-                profile: "claude-default".into(),
-                reason: Reason::OnlyRunning
-            }
-        );
+        assert_eq!(decide(P, true, &pend, &cands, now), Decision::To { profile: "claude-default".into(), reason: Reason::OnlyRunning });
     }
 
     #[test]
     fn other_provider_pending_ignored() {
         let now = Utc::now();
-        let pend = vec![Pending {
-            provider: ProviderKind::ChatGpt,
-            profile: "gpt".into(),
-            created_at: now,
-        }];
+        let pend = vec![Pending { provider: ProviderKind::ChatGpt, profile: "gpt".into(), created_at: now }];
         let cands = [c("claude-default", false, None), c("work", false, Some(3))];
-        assert_eq!(
-            decide(P, false, &pend, &cands, now),
-            Decision::To {
-                profile: "work".into(),
-                reason: Reason::MostRecent
-            }
-        );
+        assert_eq!(decide(P, false, &pend, &cands, now), Decision::To { profile: "work".into(), reason: Reason::MostRecent });
     }
 
     #[test]
     fn ambiguous_login_asks() {
         let now = Utc::now();
         let cands = [c("claude-default", true, Some(1)), c("work", true, Some(2))];
-        assert_eq!(
-            decide(P, true, &[], &cands, now),
-            Decision::Ask {
-                candidates: vec!["claude-default".into(), "work".into()]
-            }
-        );
+        assert_eq!(decide(P, true, &[], &cands, now), Decision::Ask { candidates: vec!["claude-default".into(), "work".into()] });
         // Non-login links go to the most recent.
-        assert_eq!(
-            decide(P, false, &[], &cands, now),
-            Decision::To {
-                profile: "claude-default".into(),
-                reason: Reason::MostRecent
-            }
-        );
+        assert_eq!(decide(P, false, &[], &cands, now), Decision::To { profile: "claude-default".into(), reason: Reason::MostRecent });
     }
 
     #[test]
     fn nothing_known_goes_default() {
         let now = Utc::now();
         let cands = [c("claude-default", false, None)];
-        assert_eq!(
-            decide(P, false, &[], &cands, now),
-            Decision::To {
-                profile: "claude-default".into(),
-                reason: Reason::Default
-            }
-        );
+        assert_eq!(decide(P, false, &[], &cands, now), Decision::To { profile: "claude-default".into(), reason: Reason::Default });
     }
 
     #[test]
     fn redacts_query() {
-        assert_eq!(
-            redact("claude://claude.ai/login/x?code=SECRET"),
-            "claude://claude.ai/login/x?…"
-        );
+        assert_eq!(redact("claude://claude.ai/login/x?code=SECRET"), "claude://claude.ai/login/x?…");
     }
 
     #[test]

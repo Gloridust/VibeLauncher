@@ -45,12 +45,8 @@ pub fn spawn(spec: &LaunchSpec) -> Result<()> {
         create_private_dir(d)?;
     }
     let mut cmd = command_for(spec);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("starting {}", spec.program.display()))?;
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = cmd.spawn().with_context(|| format!("starting {}", spec.program.display()))?;
     // Reap the child when it exits so a long-running GUI doesn't collect
     // zombies. The thread just blocks; it costs nothing.
     std::thread::spawn(move || {
@@ -67,12 +63,8 @@ pub fn run_and_wait(spec: &LaunchSpec, timeout: std::time::Duration) -> Result<b
         create_private_dir(d)?;
     }
     let mut cmd = command_for(spec);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("starting {}", spec.program.display()))?;
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = cmd.spawn().with_context(|| format!("starting {}", spec.program.display()))?;
     let start = std::time::Instant::now();
     loop {
         if let Some(st) = child.try_wait()? {
@@ -92,21 +84,14 @@ pub fn run_and_wait(spec: &LaunchSpec, timeout: std::time::Duration) -> Result<b
 
 /// Human-readable form of the command, for logs and the "copy command" button.
 pub fn describe(spec: &LaunchSpec) -> String {
-    let mut parts: Vec<String> = spec
-        .set_env
-        .iter()
-        .map(|(k, v)| format!("{k}={}", shell_quote(v)))
-        .collect();
+    let mut parts: Vec<String> = spec.set_env.iter().map(|(k, v)| format!("{k}={}", shell_quote(v))).collect();
     parts.push(shell_quote(&spec.program.to_string_lossy()));
     parts.extend(spec.args.iter().map(|a| shell_quote(&a.to_string_lossy())));
     parts.join(" ")
 }
 
 fn shell_quote(s: &str) -> String {
-    if !s.is_empty()
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c))
-    {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c)) {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -172,31 +157,14 @@ fn direct_command(spec: &LaunchSpec) -> Command {
 /// When VibeLauncher itself runs as an AppImage, its loader variables would
 /// make the official app load our bundled libraries. Remove them.
 fn scrub_bundle_env(c: &mut Command) {
-    let Some(appdir) = std::env::var_os("APPDIR") else {
-        return;
-    };
+    let Some(appdir) = std::env::var_os("APPDIR") else { return };
     let appdir = appdir.to_string_lossy().into_owned();
     for k in ["APPDIR", "APPIMAGE", "ARGV0", "OWD"] {
         c.env_remove(k);
     }
-    for k in [
-        "LD_LIBRARY_PATH",
-        "GST_PLUGIN_SYSTEM_PATH",
-        "GST_PLUGIN_SYSTEM_PATH_1_0",
-        "GIO_EXTRA_MODULES",
-        "GDK_PIXBUF_MODULE_FILE",
-        "GSETTINGS_SCHEMA_DIR",
-        "PYTHONPATH",
-        "PERLLIB",
-        "QT_PLUGIN_PATH",
-        "XDG_DATA_DIRS",
-        "PATH",
-    ] {
+    for k in ["LD_LIBRARY_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0", "GIO_EXTRA_MODULES", "GDK_PIXBUF_MODULE_FILE", "GSETTINGS_SCHEMA_DIR", "PYTHONPATH", "PERLLIB", "QT_PLUGIN_PATH", "XDG_DATA_DIRS", "PATH"] {
         if let Ok(v) = std::env::var(k) {
-            let kept: Vec<&str> = v
-                .split(':')
-                .filter(|p| !p.is_empty() && !p.starts_with(&appdir))
-                .collect();
+            let kept: Vec<&str> = v.split(':').filter(|p| !p.is_empty() && !p.starts_with(&appdir)).collect();
             if kept.is_empty() {
                 c.env_remove(k);
             } else {

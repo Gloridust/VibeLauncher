@@ -49,28 +49,12 @@ pub struct Check {
 }
 
 impl Check {
-    fn new(
-        id: impl Into<String>,
-        level: Level,
-        title: impl Into<String>,
-        detail: impl Into<String>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            code: "",
-            params: BTreeMap::new(),
-            level,
-            title: title.into(),
-            detail: detail.into(),
-            fix: None,
-        }
+    fn new(id: impl Into<String>, level: Level, title: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self { id: id.into(), code: "", params: BTreeMap::new(), level, title: title.into(), detail: detail.into(), fix: None }
     }
     fn code(mut self, code: &'static str, params: &[(&str, String)]) -> Self {
         self.code = code;
-        self.params = params
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect();
+        self.params = params.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
         self
     }
     fn fix(mut self, f: Fix) -> Self {
@@ -84,10 +68,7 @@ fn versions_file(paths: &Paths) -> PathBuf {
 }
 
 fn load_versions(paths: &Paths) -> BTreeMap<String, String> {
-    std::fs::read(versions_file(paths))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    std::fs::read(versions_file(paths)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 /// Remember the app version VibeLauncher last launched, to notice updates.
@@ -106,13 +87,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
     let snap = l.snapshot();
     let seen = load_versions(&l.paths);
     for provider in ProviderKind::ALL {
-        let profiles: Vec<crate::Profile> = l
-            .config
-            .profiles
-            .iter()
-            .filter(|p| p.provider == provider)
-            .cloned()
-            .collect();
+        let profiles: Vec<crate::Profile> = l.config.profiles.iter().filter(|p| p.provider == provider).cloned().collect();
         let isolated: Vec<&crate::Profile> = profiles.iter().filter(|p| p.isolated).collect();
         let name = provider.display_name();
         let inst = l.install(provider);
@@ -185,47 +160,24 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 );
             } else if let Some(c) = st.conflict {
                 out.push(
-                    Check::new(
-                        id,
-                        Level::Warning,
-                        "Another link handler is in the way",
-                        c.clone(),
-                    )
-                    .code(
-                        "routing-conflict",
-                        &[
-                            ("app", name.into()),
-                            ("scheme", scheme_name.into()),
-                            ("detail", c),
-                        ],
-                    )
-                    .fix(Fix::ClaimScheme { provider }),
+                    Check::new(id, Level::Warning, "Another link handler is in the way", c.clone())
+                        .code("routing-conflict", &[("app", name.into()), ("scheme", scheme_name.into()), ("detail", c)])
+                        .fix(Fix::ClaimScheme { provider }),
                 );
             } else {
-                let mut detail = format!(
-                    "Links open in the profile that asked for them. Current handler: {}.",
-                    st.handler.as_deref().unwrap_or("?")
-                );
+                let mut detail = format!("Links open in the profile that asked for them. Current handler: {}.", st.handler.as_deref().unwrap_or("?"));
                 if st.experimental {
                     detail.push_str(" (Experimental on this system.)");
                 }
-                out.push(
-                    Check::new(
-                        id,
-                        Level::Ok,
-                        format!("{scheme_name}:// links are routed"),
-                        detail,
-                    )
-                    .code(
-                        "routing-ok",
-                        &[
-                            ("app", name.into()),
-                            ("scheme", scheme_name.into()),
-                            ("handler", st.handler.clone().unwrap_or_default()),
-                            ("experimental", st.experimental.to_string()),
-                        ],
-                    ),
-                );
+                out.push(Check::new(id, Level::Ok, format!("{scheme_name}:// links are routed"), detail).code(
+                    "routing-ok",
+                    &[
+                        ("app", name.into()),
+                        ("scheme", scheme_name.into()),
+                        ("handler", st.handler.clone().unwrap_or_default()),
+                        ("experimental", st.experimental.to_string()),
+                    ],
+                ));
             }
         }
 
@@ -236,9 +188,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
             let expected = provider.isolation_env(&root);
             for app in snap.for_profile(&p.id) {
                 let Some(env) = &app.environ else { continue };
-                let bad = expected
-                    .iter()
-                    .find(|(k, v)| env.get(k).map(String::as_str) != Some(v.as_str()));
+                let bad = expected.iter().find(|(k, v)| env.get(k).map(String::as_str) != Some(v.as_str()));
                 if let Some((k, _)) = bad {
                     if !lost.contains(&p.id) {
                         lost.push(p.id.clone());
@@ -259,55 +209,30 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 }
             }
         }
-        for app in snap
-            .apps
-            .iter()
-            .filter(|a| a.provider == provider && a.profile_id.is_none())
-        {
-            out.push(
-                Check::new(
-                    format!("{}-unknown-{}", provider.id(), app.pid),
-                    Level::Info,
-                    format!("A {name} window isn't from any profile"),
-                    format!(
-                        "Process {} uses {}.",
-                        app.pid,
-                        app.user_data_dir
-                            .as_ref()
-                            .map(|d| d.display().to_string())
-                            .unwrap_or_default()
-                    ),
-                )
-                .code(
-                    "unknown-instance",
-                    &[
-                        ("app", name.into()),
-                        ("pid", app.pid.to_string()),
-                        (
-                            "dir",
-                            app.user_data_dir
-                                .as_ref()
-                                .map(|d| d.display().to_string())
-                                .unwrap_or_default(),
-                        ),
-                    ],
-                ),
-            );
+        for app in snap.apps.iter().filter(|a| a.provider == provider && a.profile_id.is_none()) {
+            out.push(Check::new(
+                format!("{}-unknown-{}", provider.id(), app.pid),
+                Level::Info,
+                format!("A {name} window isn't from any profile"),
+                format!("Process {} uses {}.", app.pid, app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+            )
+            .code(
+                "unknown-instance",
+                &[
+                    ("app", name.into()),
+                    ("pid", app.pid.to_string()),
+                    ("dir", app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+                ],
+            ));
         }
 
         // 4. Updated since the last launch from VibeLauncher.
-        if let (Some(v), Some(old)) = (
-            inst.as_ref().and_then(|i| i.version.clone()),
-            seen.get(provider.id()),
-        ) {
+        if let (Some(v), Some(old)) = (inst.as_ref().and_then(|i| i.version.clone()), seen.get(provider.id())) {
             if &v != old && !isolated.is_empty() {
                 let default_running = snap.is_running(provider.default_profile_id());
                 let restart: Vec<String> = isolated
                     .iter()
-                    .filter(|p| {
-                        p.last_launched_at
-                            .is_some_and(|t| chrono::Utc::now() - t < chrono::Duration::days(7))
-                    })
+                    .filter(|p| p.last_launched_at.is_some_and(|t| chrono::Utc::now() - t < chrono::Duration::days(7)))
                     .map(|p| p.id.clone())
                     .collect();
                 let mut c = Check::new(
@@ -334,11 +259,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         // 5. Several instances started together will also update together.
         let mut starts: Vec<(u64, String)> = isolated
             .iter()
-            .flat_map(|p| {
-                snap.for_profile(&p.id)
-                    .into_iter()
-                    .map(|a| (a.start_time, p.id.clone()))
-            })
+            .flat_map(|p| snap.for_profile(&p.id).into_iter().map(|a| (a.start_time, p.id.clone())))
             .collect();
         starts.sort();
         let together: Vec<String> = starts
@@ -405,21 +326,13 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
     for p in l.config.profiles.iter().filter(|p| p.isolated) {
         let root = p.data_root(&l.paths);
         if root.exists() && !root.is_dir() {
-            out.push(
-                Check::new(
-                    format!("{}-data", p.id),
-                    Level::Error,
-                    format!("“{}” can't use its data folder", p.name),
-                    format!("{} exists but isn't a folder.", root.display()),
-                )
-                .code(
-                    "data-not-dir",
-                    &[
-                        ("name", p.name.clone()),
-                        ("path", root.display().to_string()),
-                    ],
-                ),
-            );
+            out.push(Check::new(
+                format!("{}-data", p.id),
+                Level::Error,
+                format!("“{}” can't use its data folder", p.name),
+                format!("{} exists but isn't a folder.", root.display()),
+            )
+            .code("data-not-dir", &[("name", p.name.clone()), ("path", root.display().to_string())]));
         }
     }
 
@@ -431,9 +344,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
 pub fn apply(l: &mut Launcher, fix: &Fix) -> Result<()> {
     match fix {
         Fix::ClaimScheme { provider } => {
-            let inst = l
-                .install(*provider)
-                .ok_or_else(|| anyhow::anyhow!("{} isn't installed", provider.display_name()))?;
+            let inst = l.install(*provider).ok_or_else(|| anyhow::anyhow!("{} isn't installed", provider.display_name()))?;
             scheme::claim(*provider, &inst, &l.paths)
         }
         Fix::SyncShortcuts => {

@@ -1,7 +1,9 @@
 name: Release
 
 # Push a tag like v0.1.0 to build packages for every platform and attach them
-# to a draft release. Packages are unsigned until signing secrets are added.
+# to a draft release. Packages are signed (and on macOS notarized) once the
+# signing secrets are added; see docs/RELEASING.md. Without them they are
+# built unsigned, as before.
 on:
   push:
     tags: ["v*"]
@@ -86,9 +88,65 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      # Only what's set is used. macOS: Tauri reads the APPLE_* variables
+      # itself (import into a keychain, sign, notarize). Windows: the
+      # certificate is imported and its thumbprint passed in an extra config.
+      - name: Signing (when its secrets are set)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "SIGN_CONFIG=" >> "$GITHUB_ENV"
+          if [ "${{ runner.os }}" = macOS ] && [ -n "$APPLE_CERTIFICATE" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -n "${!v}" ]; then
+                { echo "$v<<VLEOF"; printf '%s\n' "${!v}"; echo "VLEOF"; } >> "$GITHUB_ENV"
+              fi
+            done
+            if [ -n "$APPLE_ID" ]; then echo "Signing and notarizing"; else echo "Signing (not notarized: APPLE_ID not set)"; fi
+          elif [ "${{ runner.os }}" = Windows ] && [ -n "$WINDOWS_CERTIFICATE" ]; then
+            printf '%s' "$WINDOWS_CERTIFICATE" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+            thumb=$(powershell -NoProfile -Command "
+              \$pw = ConvertTo-SecureString -String \$env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+              (Import-PfxCertificate -FilePath '$(cygpath -w "$RUNNER_TEMP/cert.pfx")' -CertStoreLocation Cert:\CurrentUser\My -Password \$pw).Thumbprint" | tr -d '\r')
+            rm -f "$RUNNER_TEMP/cert.pfx"
+            [ -n "$thumb" ] || { echo "::error::couldn't import the Windows certificate"; exit 1; }
+            printf '{"bundle":{"windows":{"certificateThumbprint":"%s","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}}}' "$thumb" > app/src-tauri/tauri.signing.conf.json
+            echo "SIGN_CONFIG=--config src-tauri/tauri.signing.conf.json" >> "$GITHUB_ENV"
+            echo "Signing with certificate $thumb"
+          else
+            echo "No signing secrets for ${{ runner.os }}: building unsigned"
+          fi
+
       - name: Build the window and packages
         working-directory: app
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json
+        shell: bash
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG
+
+      - name: Check the signatures
+        if: env.APPLE_CERTIFICATE != '' || env.SIGN_CONFIG != ''
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = macOS ]; then
+            app=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign -dv "$app/Contents/MacOS/vibelauncher" 2>&1 | grep -E 'Authority|TeamIdentifier'
+            if [ -n "${APPLE_ID:-}" ]; then
+              xcrun stapler validate "$app"
+              spctl -a -vvv "$app"
+            fi
+          else
+            for f in target/${{ matrix.target }}/release/vibelauncher-gui.exe target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe; do
+              powershell -NoProfile -Command "\$s = Get-AuthenticodeSignature '$(cygpath -w "$f")'; \$s.Status; if (\$s.Status -ne 'Valid') { exit 1 }"
+            done
+          fi
 
       - name: Upload to the draft release
         if: startsWith(github.ref, 'refs/tags/')

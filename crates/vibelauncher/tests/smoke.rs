@@ -580,6 +580,18 @@ fn smoke() {
     s.ok(&["quit", &chat_id]);
     s.wait_running("Smoke Chat", false);
 
+    // ── before uninstalling: links go back to the apps, shortcuts go ──
+    s.ok(&["scheme", "claim", "chatgpt"]);
+    assert_eq!(s.json(&["scheme", "status", "chatgpt"])["claimed"], true);
+    s.ok(&["cleanup"]);
+    let status = s.json(&["scheme", "status", "chatgpt"]);
+    assert_eq!(status["claimed"], false, "cleanup left codex:// claimed: {status}");
+    handed_back(&status, &CHATGPT);
+    assert_eq!(s.json(&["scheme", "status", "claude"])["claimed"], false);
+    assert!(!shortcut.exists(), "cleanup left the shortcut at {}", shortcut.display());
+    assert!(s.profile("Smoke Personal")["id"].is_string(), "cleanup removed a profile");
+    assert!(work_root.exists(), "cleanup removed profile data");
+
     // ── clean up ──
     std::fs::write(s.app_dir.join("fake-app-stop"), "").unwrap();
     s.wait_running("Smoke Work", false);

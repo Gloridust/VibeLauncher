@@ -53,8 +53,8 @@ copy, catches an instance that lost its settings, and has the system itself deli
 (`claude://`, `codex://`) through VibeLauncher. On macOS and Windows it also opens the manager
 window, keeps screenshots (English and light, Chinese and dark), and clicks through it: create a
 profile, open and quit it, sign in by pasting a link, rename it, run Diagnostics, switch language
-and theme, delete it. What CI can't check is a real sign-in with the real apps. Reports are very
-welcome — please
+and theme, delete it. What CI can't check is a real sign-in with the real apps; the 10-minute
+checklist for that is [docs/TESTING.md](docs/TESTING.md). Reports are very welcome — please
 [open an issue](https://github.com/Gloridust/VibeLauncher/issues).
 
 ## Install
@@ -65,7 +65,9 @@ Download a package from [Releases](https://github.com/Gloridust/VibeLauncher/rel
 - **macOS:** `.dmg` (Apple silicon and Intel).
 - **Windows:** the `-setup.exe` installer (per-user, no admin rights).
 
-The macOS and Windows packages aren't code-signed yet, so the system asks once before opening them:
+The macOS and Windows packages aren't code-signed yet (the release workflow signs them once the
+certificates are added; see [docs/RELEASING.md](docs/RELEASING.md)), so the system asks once before
+opening them:
 
 - **macOS:** drag VibeLauncher to Applications, then right-click it and choose **Open** (or allow it
   under System Settings → Privacy & Security). If macOS says the app is damaged, run
@@ -92,6 +94,7 @@ vibelauncher delete <profile> [--delete-data]
 vibelauncher doctor [--fix]          Find and fix common problems
 vibelauncher scheme status|claim|release
 vibelauncher log                     Recent link-routing decisions
+vibelauncher cleanup                 Before uninstalling: give links back to the apps, remove shortcuts
 ```
 
 Profile data lives in `~/.local/share/vibelauncher/profiles` (Linux),
@@ -122,6 +125,11 @@ than one profile of it, and hands it back when you turn routing off:
   falls back to the app if VibeLauncher is gone. The system file is never edited.
 - **macOS:** a tiny router app registered for the scheme.
 - **Windows:** the per-user (`HKCU`) handler, with the previous value backed up.
+
+Uninstalling on Windows gives the links back and removes the shortcuts by itself. On macOS and Linux,
+run `vibelauncher cleanup` before deleting the app; if you forget, links still reach the app (the
+Linux entry and the macOS router fall back to it), and the shortcuts are the only thing left over.
+Profiles and their data are never removed by uninstalling.
 
 More detail, including measurements and design notes, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -191,6 +199,6 @@ VibeLauncher 让官方 Claude 和 ChatGPT 桌面版拥有多个**互相独立的
 
 **已知限制**：Claude 的 Cowork 虚拟机属于系统账户而不是配置，同一时间只有一个配置能用；部分全局开关（如文件管理器里的“用 Claude 打开”）是共享的；终端里的 `codex` 命令仍使用默认账号（`~/.codex`）；它依赖官方应用目前的行为，若更新改变了这些行为，“诊断”会提示。
 
-macOS 和 Windows 上，CI 每次改动都会用替身应用为 Claude 和 ChatGPT 跑通命令行的完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交 `claude://` / `codex://` 登录链接），并打开管理窗口留下截图（英文浅色、中文深色），再在窗口里把操作点一遍（新建、打开、退出、粘贴链接登录、改名、诊断、切换语言和外观、删除）；但还没有用真实账号登录过。欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
+macOS 和 Windows 上，CI 每次改动都会用替身应用为 Claude 和 ChatGPT 跑通命令行的完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交 `claude://` / `codex://` 登录链接），并打开管理窗口留下截图（英文浅色、中文深色），再在窗口里把操作点一遍（新建、打开、退出、粘贴链接登录、改名、诊断、切换语言和外观、删除）；但还没有用真实账号登录过（检查清单见 [docs/TESTING.md](docs/TESTING.md)）。欢迎反馈。这两个平台的安装包暂未签名（配好证书后发版流程会自动签名，见 [docs/RELEASING.md](docs/RELEASING.md)）：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。Windows 卸载时会自动把链接还给应用并删掉快捷方式；macOS 和 Linux 上删除前先运行 `vibelauncher cleanup`（忘了也不要紧，链接仍会交给应用，只会留下快捷方式）。配置和数据不会因卸载被删除。
 
 本项目与 Anthropic、OpenAI 无关。

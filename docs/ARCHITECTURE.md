@@ -268,6 +268,12 @@ trait Platform {
   2. **启动器注册为处理程序，并在每次启动 Profile 后几秒重新注册**（`LSSetDefaultHandlerForURLScheme`）。风险：Claude 发现自己不是处理程序后会换登录方式，可能反而更顺。要实测看结果。重新注册在后台进程里跑（`internal-reassert`），每次动手前先确认路由还开着、链接没被释放（`state/scheme-claimed-<app>`），释放后不再抢回；认领、释放、重新注册跨进程互斥（`state/scheme.lock`），避免 macOS 上两个进程同时重建路由应用。
   3. 兜底：粘贴回调链接手动转交。
 
+**卸载时**
+- `vibelauncher cleanup`：释放所有认领的链接（交回备份里的原处理程序），删掉各配置的快捷方式；配置和数据不动。
+- Windows 安装器在卸载前自动调用它（`app/src-tauri/windows/hooks.nsh` 的 `NSIS_HOOK_PREUNINSTALL`；升级时 `$UpdateMode` 为 1，跳过）。
+- macOS 没有卸载程序可挂。路由应用每次生成时把原处理程序的 Bundle ID 写进脚本：找不到 `vibelauncher` 时用 `open -b <原应用>` 直接交给应用，所以直接删掉 VibeLauncher 也不会让登录链接失效。认领时若系统还没有处理程序，就记应用自己的 Bundle ID。
+- Linux 的同名覆盖本来就在找不到启动器时回退到应用。
+
 **Windows【未验证】**
 - Claude 启动时会写 `HKCU\Software\Classes\claude`。MSIX 版的协议声明在包清单里，两者优先级要实测。
 - 候选：启动器在每次启动 Profile 后重新写注册表项；或者和 macOS 方案 1 一样靠时机。

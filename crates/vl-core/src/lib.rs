@@ -497,6 +497,32 @@ impl Launcher {
         Ok(self.apply_routing())
     }
 
+    /// Undo what VibeLauncher set up outside its own folders, before it is
+    /// uninstalled: give the link schemes back to the apps and remove the
+    /// shortcuts. Profiles, their data and the settings stay, so installing
+    /// again brings everything back. Returns problems.
+    pub fn cleanup(&mut self) -> Vec<String> {
+        let mut errs = Vec::new();
+        for provider in ProviderKind::ALL {
+            let inst = self.install(provider);
+            let st = scheme::status(provider, inst.as_ref(), &self.paths);
+            if st.claimed || scheme::was_claimed(provider, &self.paths) {
+                if let Err(e) = scheme::release(provider, inst.as_ref(), &self.paths) {
+                    errs.push(format!("{}: {e:#}", provider.display_name()));
+                }
+            }
+        }
+        for p in &self.config.profiles {
+            let path = shortcuts::shortcut_path(p);
+            if path.exists() {
+                if let Err(e) = shortcuts::remove(p) {
+                    errs.push(format!("{}: {e:#}", p.name));
+                }
+            }
+        }
+        errs
+    }
+
     pub fn sync_shortcuts(&mut self) -> Vec<String> {
         let installs: BTreeMap<ProviderKind, Option<AppInstall>> =
             ProviderKind::ALL.iter().map(|p| (*p, self.install(*p))).collect();

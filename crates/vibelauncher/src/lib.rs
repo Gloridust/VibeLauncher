@@ -27,6 +27,9 @@ USAGE
   vibelauncher shortcuts sync          Recreate launcher shortcuts
   vibelauncher scheme status|claim|release [claude|chatgpt]
   vibelauncher log                     Show recent link-routing decisions
+  vibelauncher cleanup                 Before uninstalling: give claude:// and
+                                       codex:// back to the apps and remove the
+                                       shortcuts (profiles and data stay)
   vibelauncher --version
 
 <profile> is a profile id or name. Data and settings live in the paths shown by
@@ -80,7 +83,7 @@ impl Args {
 pub fn is_command(first: &str) -> bool {
     const CMDS: &[&str] = &[
         "-h", "--help", "help", "-V", "--version", "version", "list", "ls", "ps", "launch", "open", "login", "quit",
-        "open-url", "route", "create", "new", "delete", "rm", "doctor", "shortcuts", "scheme", "log",
+        "open-url", "route", "create", "new", "delete", "rm", "doctor", "shortcuts", "scheme", "log", "cleanup",
         "internal-reassert",
     ];
     CMDS.contains(&first) || first.contains("://")
@@ -201,6 +204,17 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
                     o => bail!("unknown `scheme {o}`"),
                 }
             }
+        }
+        "cleanup" => {
+            let mut l = Launcher::open()?;
+            let errs = l.cleanup();
+            for e in &errs {
+                eprintln!("{e}");
+            }
+            if !errs.is_empty() {
+                return Ok(ExitCode::from(1));
+            }
+            println!("Links are handled by the apps again and the shortcuts are gone. Profiles and their data are kept.");
         }
         "log" => {
             let l = Launcher::open()?;

@@ -35,3 +35,5 @@ app/src-tauri/binaries/
 .claude/
 # .github/scripts/window-check.sh output
 window-shots/
+# written by the release workflow when signing on Windows
+app/src-tauri/tauri.signing.conf.json

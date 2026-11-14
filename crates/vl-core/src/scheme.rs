@@ -67,6 +67,11 @@ pub fn reassert(provider: ProviderKind, install: &AppInstall, paths: &Paths) -> 
     imp::reassert(provider, install, paths)
 }
 
+/// Whether VibeLauncher took the scheme (and hasn't released it).
+pub fn was_claimed(provider: ProviderKind, paths: &Paths) -> bool {
+    claim_marker(provider, paths).exists()
+}
+
 /// Note that we hold the scheme (for claims made before the note existed).
 pub fn remember_claim(provider: ProviderKind, paths: &Paths) {
     let _ = crate::paths::write_atomic(&claim_marker(provider, paths), b"");
@@ -518,15 +523,41 @@ mod imp {
         list
     }
 
+    /// The router's AppleScript: hand links to `vibelauncher open-url`, or,
+    /// when VibeLauncher is gone, straight to the app that had the scheme.
+    pub(super) fn router_script(exe: &str, fallbacks: &[(String, String)]) -> String {
+        let exe = applescript_quote(exe);
+        let mut gone = String::new();
+        for (scheme, bundle) in fallbacks {
+            gone += &format!(
+                "    if theURL starts with {} then do shell script \"/usr/bin/open -b \" & quoted form of {} & \" \" & quoted form of theURL\n",
+                applescript_quote(&format!("{scheme}:")),
+                applescript_quote(bundle)
+            );
+        }
+        if gone.is_empty() {
+            gone = "    return\n".into();
+        }
+        format!(
+            "on open location theURL\n  set exe to {exe}\n  if (do shell script \"test -x \" & quoted form of exe & \" && echo yes || echo no\") is \"yes\" then\n    do shell script quoted form of exe & \" open-url -- \" & quoted form of theURL & \" > /dev/null 2>&1 &\"\n  else\n{gone}  end if\nend open location\non run\n  do shell script quoted form of {exe} & \" > /dev/null 2>&1 &\"\nend run\n"
+        )
+    }
+
     /// Build the router declaring exactly `schemes`, so a scheme we let go of
     /// isn't still claimed by it.
     fn build_router(paths: &Paths, schemes: &[String]) -> Result<PathBuf> {
         let app = router_app(paths);
         let exe = crate::paths::self_exe();
-        let script = format!(
-            "on open location theURL\n  do shell script quoted form of {exe} & \" open-url -- \" & quoted form of theURL & \" > /dev/null 2>&1 &\"\nend open location\non run\n  do shell script quoted form of {exe} & \" > /dev/null 2>&1 &\"\nend run\n",
-            exe = applescript_quote(&exe.to_string_lossy())
-        );
+        // Who had each scheme before us, so links still reach the app if
+        // VibeLauncher is deleted without `vibelauncher cleanup`.
+        let fallbacks: Vec<(String, String)> = schemes
+            .iter()
+            .filter_map(|s| {
+                let prev = std::fs::read_to_string(backup_file(paths, s)).ok()?.trim().to_string();
+                (!prev.is_empty() && !is_router(Some(&prev))).then(|| (s.clone(), prev))
+            })
+            .collect();
+        let script = router_script(&exe.to_string_lossy(), &fallbacks);
         let src = paths.state_dir.join("router.applescript");
         crate::paths::write_atomic(&src, script.as_bytes())?;
         let _ = std::fs::remove_dir_all(&app);
@@ -570,12 +601,14 @@ mod imp {
         }
     }
 
-    pub fn claim(provider: ProviderKind, _install: &AppInstall, paths: &Paths) -> Result<()> {
+    pub fn claim(provider: ProviderKind, install: &AppInstall, paths: &Paths) -> Result<()> {
         let scheme = provider.schemes()[0];
-        if let Some(prev) = current_handler(scheme) {
-            if !prev.eq_ignore_ascii_case(ROUTER_BUNDLE_ID) {
-                crate::paths::write_atomic(&backup_file(paths, scheme), prev.as_bytes())?;
-            }
+        // Remember who to give it back to: the current handler, else the app.
+        let prev = current_handler(scheme)
+            .filter(|h| !is_router(Some(h)))
+            .or_else(|| install.bundle.as_ref().and_then(|b| crate::install::macos::plist_value(b, "CFBundleIdentifier")));
+        if let Some(prev) = prev {
+            crate::paths::write_atomic(&backup_file(paths, scheme), prev.as_bytes())?;
         }
         build_router(paths, &with_scheme(declared_schemes(paths), scheme))?;
         set_handler(scheme, ROUTER_BUNDLE_ID)
@@ -619,5 +652,44 @@ mod imp {
             }
         }
         set_handler(scheme, ROUTER_BUNDLE_ID)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// The router script compiles, also with awkward paths, and falls
+        /// back to the app when VibeLauncher is gone.
+        #[test]
+        fn router_script_compiles() {
+            let s = super::router_script(
+                "/Applications/Vibe \"Launcher\".app/Contents/MacOS/vibelauncher",
+                &[("claude".into(), "com.anthropic.claudefordesktop".into()), ("codex".into(), "com.openai.chat".into())],
+            );
+            assert!(s.contains("/usr/bin/open -b"));
+            let dir = std::env::temp_dir().join(format!("vl-router-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("r.applescript"), &s).unwrap();
+            let ok = std::process::Command::new("/usr/bin/osacompile")
+                .arg("-o")
+                .arg(dir.join("r.scpt"))
+                .arg(dir.join("r.applescript"))
+                .status()
+                .unwrap()
+                .success();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(ok, "osacompile rejected:\n{s}");
+            // No app to fall back to (nothing had the scheme before).
+            let s = super::router_script("/tmp/vibelauncher", &[]);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("r.applescript"), &s).unwrap();
+            let ok = std::process::Command::new("/usr/bin/osacompile")
+                .arg("-o")
+                .arg(dir.join("r.scpt"))
+                .arg(dir.join("r.applescript"))
+                .status()
+                .unwrap()
+                .success();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(ok, "osacompile rejected:\n{s}");
+        }
     }
 }

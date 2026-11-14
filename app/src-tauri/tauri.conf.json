@@ -53,7 +53,7 @@
       "signingIdentity": "-"
     },
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": { "installMode": "currentUser", "installerHooks": "./windows/hooks.nsh" }
     }
   }
 }

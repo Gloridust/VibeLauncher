@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Gloridust/VibeLauncher/actions/workflows/ci.yml"><img src="https://github.com/Gloridust/VibeLauncher/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Gloridust/VibeLauncher/releases/latest"><img src="https://img.shields.io/github/v/release/Gloridust/VibeLauncher" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-555" alt="Platforms">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555" alt="MIT License"></a>
 </p>

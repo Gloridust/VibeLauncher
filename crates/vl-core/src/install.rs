@@ -199,6 +199,12 @@ pub fn find_installs(provider: ProviderKind, override_path: Option<&Path>) -> Ve
 }
 
 pub fn find_install(provider: ProviderKind, override_path: Option<&Path>) -> Option<AppInstall> {
+    // The user's choice wins, so there's no need to search (on Windows that
+    // means asking PowerShell for Store packages, about a second each).
+    if let Some(mut i) = override_path.and_then(|p| from_manual_path(provider, p)) {
+        i.fill_version_and_icon();
+        return Some(i);
+    }
     find_installs(provider, override_path).into_iter().next()
 }
 

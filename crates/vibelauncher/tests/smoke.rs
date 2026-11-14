@@ -30,6 +30,14 @@ struct Smoke {
     os_dispatch: bool,
 }
 
+impl Drop for Smoke {
+    /// Stop any stand-in still running, also when the test failed.
+    fn drop(&mut self) {
+        let _ = std::fs::write(self.app_dir.join("fake-app-stop"), "");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
 fn canonical(p: &Path) -> PathBuf {
     let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     // Strip Windows' \\?\ prefix so the path looks like the ones users pick.
@@ -119,7 +127,14 @@ impl Smoke {
 
     /// What VibeLauncher and the OS each see, for a failed wait.
     fn dump_processes(&self) {
-        let _ = self.cmd(&["ps"]);
+        let mut ps = Command::new(CMD);
+        ps.arg("ps").env("VIBELAUNCHER_DEBUG_PROCS", "1");
+        for (k, v) in &self.vars {
+            ps.env(k, v);
+        }
+        if let Ok(o) = ps.output() {
+            eprintln!("$ vibelauncher ps\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        }
         eprintln!("stand-in launches: {:#?}", self.launches());
         let os = if cfg!(target_os = "windows") {
             Command::new("powershell")
@@ -368,7 +383,17 @@ fn smoke() {
     assert_eq!(status["claimed"], false, "still claimed: {status}");
     // The stand-in declares claude:// like the real app, so it gets it back.
     #[cfg(target_os = "macos")]
-    assert_eq!(status["handler"], "io.github.gloridust.vlsmoke.claude", "the app didn't get its links back: {status}");
+    if status["handler"] != "io.github.gloridust.vlsmoke.claude" {
+        let dump = Command::new(
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        )
+        .arg("-dump")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+        let known: Vec<&str> = dump.lines().filter(|l| l.contains("vlsmoke") || l.contains("vibelauncher")).collect();
+        panic!("the app didn't get its links back: {status}\nLaunch Services knows:\n{}", known.join("\n"));
+    }
 
     // ── shortcuts ──
     let shortcut = shortcut_for(&s, "Smoke Personal", &personal_id);

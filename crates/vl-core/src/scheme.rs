@@ -556,13 +556,9 @@ mod imp {
         let prev = std::fs::read_to_string(backup_file(paths, scheme)).ok().or_else(|| {
             install.and_then(|i| i.bundle.as_ref()).and_then(|b| crate::install::macos::plist_value(b, "CFBundleIdentifier"))
         });
-        let restored = match prev.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-            Some(prev) => set_handler(scheme, prev),
-            None => Ok(()),
-        };
-        let _ = std::fs::remove_file(backup_file(paths, scheme));
-        // Stop declaring the scheme, so that with nothing to hand back to,
-        // Launch Services falls back to whatever else handles it.
+        // Stop declaring the scheme first: unregistering the router can make
+        // Launch Services forget the scheme's default, which would undo a
+        // handler restored before it.
         let declared = declared_schemes(paths);
         let rest: Vec<String> = declared.iter().filter(|s| *s != scheme).cloned().collect();
         if rest.is_empty() {
@@ -570,8 +566,12 @@ mod imp {
         } else if rest.len() != declared.len() {
             build_router(paths, &rest)?;
         }
+        if let Some(prev) = prev.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            set_handler(scheme, prev)
+                .with_context(|| format!("giving {scheme}:// links back to {prev}"))?;
+        }
+        let _ = std::fs::remove_file(backup_file(paths, scheme));
         if router_app(paths).exists() && is_router(current_handler(scheme).as_deref()) {
-            restored?;
             bail!("macOS still sends {scheme}:// links to VibeLauncher; choose another app for them in that app's settings");
         }
         Ok(())

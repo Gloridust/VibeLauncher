@@ -336,7 +336,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         }
     }
 
-    out.sort_by(|a, b| b.level.cmp(&a.level));
+    out.sort_by_key(|a| std::cmp::Reverse(a.level));
     out
 }
 

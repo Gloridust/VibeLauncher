@@ -98,6 +98,9 @@ impl Snapshot {
                 },
             );
         }
+        if std::env::var_os("VIBELAUNCHER_DEBUG_PROCS").is_some() {
+            debug_dump(&sys, installs);
+        }
         let mut apps = Vec::new();
         for (pid, p) in sys.processes() {
             if p.thread_kind().is_some() {
@@ -172,6 +175,34 @@ impl Snapshot {
             .collect();
         v.dedup();
         v
+    }
+}
+
+/// `VIBELAUNCHER_DEBUG_PROCS=1 vibelauncher ps`: what the scan sees for every
+/// process that looks like one of the apps, and why it was (not) counted.
+fn debug_dump(sys: &System, installs: &[AppInstall]) {
+    for i in installs {
+        eprintln!("install {:?}: program {:?}, matches {:?}", i.provider, i.program, i.match_exes);
+    }
+    let names: Vec<String> = ProviderKind::ALL
+        .iter()
+        .flat_map(|p| p.process_names().iter().map(|n| n.trim_end_matches(".exe").to_string()))
+        .collect();
+    for (pid, p) in sys.processes() {
+        let name = p.name().to_string_lossy().to_lowercase();
+        if !names.iter().any(|n| name.contains(n.as_str())) {
+            continue;
+        }
+        let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let canon = p.exe().map(|e| e.canonicalize());
+        eprintln!(
+            "pid {pid} name {name:?} parent {:?} thread {:?}\n  exe {:?} canonical {canon:?}\n  cmd {cmd:?}\n  class {:?} environ {}",
+            p.parent(),
+            p.thread_kind(),
+            p.exe(),
+            classify(p.exe(), &normalize_cmd(cmd.clone()), installs),
+            p.environ().len(),
+        );
     }
 }
 

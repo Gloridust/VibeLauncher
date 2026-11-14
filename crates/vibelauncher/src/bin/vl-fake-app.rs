@@ -27,7 +27,7 @@ fn main() {
     drop(f);
 
     let stop = dir.join("fake-app-stop");
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_secs(600);
     while Instant::now() < deadline && !stop.exists() {
         std::thread::sleep(Duration::from_millis(200));
     }

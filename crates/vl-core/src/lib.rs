@@ -193,7 +193,11 @@ impl Launcher {
             return Ok(false);
         }
         // Every copy, not just the first (`any` would stop early).
-        Ok(apps.iter().fold(false, |sent, a| procs::terminate(a.pid) || sent))
+        let mut sent = false;
+        for a in apps {
+            sent |= procs::terminate(a.pid);
+        }
+        Ok(sent)
     }
 
     /// Quit the given profiles, wait for them to exit, then start them one by

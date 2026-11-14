@@ -31,12 +31,25 @@ fail=0
 run() {
   echo "+ $(date +%T) $*" >&2
   local rc=0
-  timeout 180 "$@" || rc=$?
-  if [ $rc = 124 ]; then
+  "$@" &
+  local pid=$! waited=0
+  while kill -0 $pid 2>/dev/null && [ $waited -lt 180 ]; do sleep 2; waited=$((waited + 2)); done
+  if kill -0 $pid 2>/dev/null; then
     echo "::error::timed out: $*" >&2
+    mkdir -p installer-shots
+    powershell -NoProfile -Command "
+      Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+      \$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+      \$bmp = New-Object System.Drawing.Bitmap \$b.Width, \$b.Height
+      [System.Drawing.Graphics]::FromImage(\$bmp).CopyFromScreen(\$b.Location, [System.Drawing.Point]::Empty, \$b.Size)
+      \$bmp.Save('$(cygpath -w "$PWD/installer-shots/hang.png")')" >&2 || true
+    powershell -NoProfile -Command "Get-Process | Where-Object { \$_.MainWindowTitle } | Select-Object Id,Name,MainWindowTitle | Format-Table -AutoSize" >&2 || true
+    ls -la "$inst" >&2 || true
+    reg query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\VibeLauncher' >&2 || true
     powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CreationDate -gt (Get-Date).AddMinutes(-5) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | Format-List" >&2 || true
     exit 1
   fi
+  wait $pid || rc=$?
   return $rc
 }
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }

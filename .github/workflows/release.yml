@@ -146,6 +146,14 @@ jobs:
           cargo build --release --locked -p vibelauncher --features smoke-test --bin vl-fake-app --target ${{ matrix.target }}
           bash .github/scripts/installer-check.sh ${{ matrix.target }}
 
+      - name: Keep installer screenshots
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-shots
+          path: installer-shots
+          if-no-files-found: ignore
+
       - name: Check the signatures
         if: env.APPLE_CERTIFICATE != '' || env.SIGN_CONFIG != ''
         shell: bash

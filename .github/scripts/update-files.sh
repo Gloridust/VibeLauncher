@@ -47,13 +47,16 @@ add() {
 }
 
 # marker <file> <expected>: the bundler writes the package kind into the
-# binary, over the "_UNK" placeholder. Every kind's name is in the binary once
-# (the code that reads it); the one written there makes it twice.
+# binary, over the "_UNK" placeholder. Depending on how the binary was
+# optimized, the other kinds' names may also be in it (once, in the code that
+# reads them); the one written there must appear more often than any other.
 marker() {
-  local counts
-  counts=$(grep -aoE '__TAURI_BUNDLE_TYPE_VAR_[A-Z]{3}' "$1" | sort | uniq -c | tr -s ' \n' ' ')
-  if grep -aq '__TAURI_BUNDLE_TYPE_VAR_UNK' "$1" || [ "$(grep -aoE "__TAURI_BUNDLE_TYPE_VAR_$2" "$1" | wc -l)" -ne 2 ]; then
-    echo "::error::$1 doesn't say it is $2:$counts"; exit 1
+  local counts want most
+  counts=$(grep -aoE '__TAURI_BUNDLE_TYPE_VAR_[A-Z]{3}' "$1" | sed 's/.*_//' | sort | uniq -c)
+  want=$(awk -v k="$2" '$2 == k {print $1}' <<<"$counts")
+  most=$(awk -v k="$2" '$2 != k && $1 > m {m = $1} END {print m + 0}' <<<"$counts")
+  if grep -aq '__TAURI_BUNDLE_TYPE_VAR_UNK' "$1" || [ "${want:-0}" -le "$most" ]; then
+    echo "::error::$1 doesn't say it is $2:" $counts; exit 1
   fi
 }
 

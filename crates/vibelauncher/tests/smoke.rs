@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 
 const CMD: &str = env!("CARGO_BIN_EXE_vibelauncher");
 const FAKE: &str = env!("CARGO_BIN_EXE_vl-fake-app");
+#[cfg(target_os = "macos")]
+const LSREGISTER: &str =
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 struct Smoke {
     _tmp: tempfile::TempDir,
@@ -35,6 +38,11 @@ impl Drop for Smoke {
     fn drop(&mut self) {
         let _ = std::fs::write(self.app_dir.join("fake-app-stop"), "");
         std::thread::sleep(Duration::from_millis(500));
+        #[cfg(target_os = "macos")]
+        if let Some(parent) = self.app_path.parent().filter(|p| p.to_string_lossy().contains("/Applications/VLSmoke-")) {
+            let _ = Command::new(LSREGISTER).arg("-u").arg(&self.app_path).status();
+            let _ = std::fs::remove_dir_all(parent);
+        }
     }
 }
 
@@ -214,8 +222,15 @@ fn make_fake_app(root: &Path, vars: &mut Vec<(String, String)>, mode: &str) -> (
 }
 
 #[cfg(target_os = "macos")]
-fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, _mode: &str) -> (PathBuf, PathBuf) {
-    let bundle = root.join("VLSmokeClaude.app");
+fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, mode: &str) -> (PathBuf, PathBuf) {
+    // In CI, where a real install would be: Launch Services may not name an
+    // app inside a temporary folder as a scheme's default.
+    let parent = if mode == "ci" {
+        PathBuf::from(std::env::var("HOME").unwrap()).join("Applications").join(format!("VLSmoke-{}", std::process::id()))
+    } else {
+        root.to_path_buf()
+    };
+    let bundle = parent.join("VLSmokeClaude.app");
     let dir = bundle.join("Contents/MacOS");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(FAKE, dir.join("VLSmokeClaude")).unwrap();
@@ -240,12 +255,7 @@ fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, _mode: &str) ->
     .unwrap();
     let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).status();
     // Like the real app, it declares claude:// and Launch Services knows it.
-    let _ = Command::new(
-        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-    )
-    .arg("-f")
-    .arg(&bundle)
-    .status();
+    let _ = Command::new(LSREGISTER).arg("-f").arg(&bundle).status();
     (dir, bundle)
 }
 
@@ -301,6 +311,8 @@ fn smoke() {
         .unwrap();
     let list = s.ok(&["list"]);
     assert!(list.lines().next().unwrap().starts_with("Claude") && !list.contains("Claude (not found)"), "Claude not found:\n{list}");
+    // Before anything is claimed: who the system sends claude:// to (logged only).
+    let _ = s.cmd(&["scheme", "status", "claude"]);
 
     // ── create + launch: own data folder and CLAUDE_CONFIG_DIR ──
     s.ok(&["create", "Smoke Work", "--app", "claude"]);
@@ -384,15 +396,25 @@ fn smoke() {
     // The stand-in declares claude:// like the real app, so it gets it back.
     #[cfg(target_os = "macos")]
     if status["handler"] != "io.github.gloridust.vlsmoke.claude" {
-        let dump = Command::new(
-            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-        )
-        .arg("-dump")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
-        let known: Vec<&str> = dump.lines().filter(|l| l.contains("vlsmoke") || l.contains("vibelauncher")).collect();
-        panic!("the app didn't get its links back: {status}\nLaunch Services knows:\n{}", known.join("\n"));
+        let dump = Command::new(LSREGISTER)
+            .arg("-dump")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        // Whole records (separated by dashed lines) that mention the stand-in.
+        let mut known = Vec::new();
+        let mut block = Vec::new();
+        for l in dump.lines().chain(std::iter::once("----")) {
+            if l.starts_with("----") {
+                if block.iter().any(|b: &&str| b.contains("vlsmoke") || b.contains("vibelauncher.router")) {
+                    known.push(block.iter().take(60).copied().collect::<Vec<_>>().join("\n"));
+                }
+                block.clear();
+            } else {
+                block.push(l);
+            }
+        }
+        panic!("the app didn't get its links back: {status}\nLaunch Services knows:\n{}", known.join("\n----\n"));
     }
 
     // ── shortcuts ──

@@ -1,0 +1,205 @@
+name: Release
+
+# Push a tag like v0.1.0 to build packages for every platform and attach them
+# to a draft release. Packages are signed (and on macOS notarized) once the
+# signing secrets are added; see docs/RELEASING.md. Without them they are
+# built unsigned, as before.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  # Build the packages (without publishing) when the packaging itself changes.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - app/src-tauri/tauri.conf.json
+      - app/src-tauri/tauri.bundle.conf.json
+      - app/src-tauri/windows/**
+      - .github/scripts/installer-check.sh
+      - crates/vibelauncher/src/lib.rs
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - name: macOS Apple silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          # Cross-compiled on Apple silicon; Intel runners are being retired.
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf rpm
+
+      - name: Build the command
+        run: cargo build --release --locked -p vibelauncher --target ${{ matrix.target }}
+
+      # Tauri ships `binaries/vibelauncher-<target>` next to the window binary
+      # (installed as `vibelauncher`), so shortcuts and link routing never need
+      # the window.
+      - name: Place the command for bundling
+        shell: bash
+        run: |
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          mkdir -p app/src-tauri/binaries
+          cp "target/${{ matrix.target }}/release/vibelauncher$ext" \
+             "app/src-tauri/binaries/vibelauncher-${{ matrix.target }}$ext"
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      # Only what's set is used. macOS: Tauri reads the APPLE_* variables
+      # itself (import into a keychain, sign, notarize). Windows: the
+      # certificate is imported and its thumbprint passed in an extra config.
+      - name: Signing (when its secrets are set)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "SIGN_CONFIG=" >> "$GITHUB_ENV"
+          if [ "${{ runner.os }}" = macOS ] && [ -n "$APPLE_CERTIFICATE" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -n "${!v}" ]; then
+                { echo "$v<<VLEOF"; printf '%s\n' "${!v}"; echo "VLEOF"; } >> "$GITHUB_ENV"
+              fi
+            done
+            # tauri.conf.json has the ad-hoc identity "-"; replace it.
+            printf '{"bundle":{"macOS":{"signingIdentity":"%s"}}}' "$APPLE_SIGNING_IDENTITY" > app/src-tauri/tauri.signing.conf.json
+            echo "SIGN_CONFIG=--config src-tauri/tauri.signing.conf.json" >> "$GITHUB_ENV"
+            if [ -n "$APPLE_ID" ]; then echo "Signing and notarizing"; else echo "Signing (not notarized: APPLE_ID not set)"; fi
+          elif [ "${{ runner.os }}" = Windows ] && [ -n "$WINDOWS_CERTIFICATE" ]; then
+            printf '%s' "$WINDOWS_CERTIFICATE" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+            thumb=$(powershell -NoProfile -Command "
+              \$pw = ConvertTo-SecureString -String \$env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+              (Import-PfxCertificate -FilePath '$(cygpath -w "$RUNNER_TEMP/cert.pfx")' -CertStoreLocation Cert:\CurrentUser\My -Password \$pw).Thumbprint" | tr -d '\r')
+            rm -f "$RUNNER_TEMP/cert.pfx"
+            [ -n "$thumb" ] || { echo "::error::couldn't import the Windows certificate"; exit 1; }
+            printf '{"bundle":{"windows":{"certificateThumbprint":"%s","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}}}' "$thumb" > app/src-tauri/tauri.signing.conf.json
+            echo "SIGN_CONFIG=--config src-tauri/tauri.signing.conf.json" >> "$GITHUB_ENV"
+            echo "Signing with certificate $thumb"
+          else
+            echo "No signing secrets for ${{ runner.os }}: building unsigned"
+          fi
+
+      - name: Build the window and packages
+        working-directory: app
+        shell: bash
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG
+
+      # Install, upgrade and uninstall with the hooks in
+      # app/src-tauri/windows/hooks.nsh, using a stand-in Claude.
+      - name: Check the installer (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          cargo build --release --locked -p vibelauncher --features smoke-test --bin vl-fake-app --target ${{ matrix.target }}
+          bash .github/scripts/installer-check.sh ${{ matrix.target }}
+
+      - name: Keep installer screenshots
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-shots
+          path: installer-shots
+          if-no-files-found: ignore
+
+      - name: Check the signatures
+        if: env.APPLE_CERTIFICATE != '' || env.SIGN_CONFIG != ''
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = macOS ]; then
+            app=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
+            codesign --verify --deep --strict --verbose=2 "$app"
+            # An ad-hoc signature also verifies; require the Developer ID.
+            for f in "$app" "$app/Contents/MacOS/vibelauncher"; do
+              info=$(codesign -dv --verbose=4 "$f" 2>&1)
+              echo "$info" | grep -E '^(Authority|TeamIdentifier)='
+              if ! echo "$info" | grep -q '^Authority=Developer ID Application'; then
+                echo "::error::$f isn't signed with a Developer ID"; exit 1
+              fi
+            done
+            if [ -n "${APPLE_ID:-}" ]; then
+              xcrun stapler validate "$app"
+              spctl -a -vvv "$app"
+            fi
+          else
+            for f in target/${{ matrix.target }}/release/vibelauncher-gui.exe target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe; do
+              powershell -NoProfile -Command "\$s = Get-AuthenticodeSignature '$(cygpath -w "$f")'; \$s.Status; if (\$s.Status -ne 'Valid') { exit 1 }"
+            done
+          fi
+
+      - name: Upload to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+
+      - name: Keep the packages (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibelauncher-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

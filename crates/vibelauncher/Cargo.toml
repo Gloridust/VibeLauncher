@@ -1,0 +1,42 @@
+[package]
+name = "vibelauncher"
+description = "VibeLauncher command: opens profiles, routes claude:// and codex:// links, runs diagnostics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "vibelauncher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vibelauncher"
+path = "src/main.rs"
+
+# A stand-in app and an end-to-end test that drives the real command against
+# it on each OS: `cargo test -p vibelauncher --features smoke-test --test smoke`.
+# Neither is built by default.
+[[bin]]
+name = "vl-fake-app"
+path = "src/bin/vl-fake-app.rs"
+required-features = ["smoke-test"]
+
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+required-features = ["smoke-test"]
+
+[features]
+smoke-test = []
+
+[dependencies]
+vl-core = { path = "../vl-core" }
+anyhow = "1"
+serde_json = "1"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_System_Console"] }
+
+[dev-dependencies]
+tempfile = "3"

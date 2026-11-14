@@ -1,0 +1,33 @@
+[package]
+name = "vibelauncher-gui"
+description = "VibeLauncher's manager window. Profiles are opened by the `vibelauncher` command; this window only manages them."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vibelauncher-gui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+vl-core = { path = "../../crates/vl-core" }
+vibelauncher = { path = "../../crates/vibelauncher" }
+tauri = { version = "2.12", features = [] }
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-dialog = "2.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+url = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[features]
+# The click-through test in CI: lets the page write its results to
+# $VL_SELFTEST_OUT. Pair with VITE_SELFTEST=1 when building the page.
+selftest = []
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

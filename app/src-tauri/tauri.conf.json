@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VibeLauncher",
+  "mainBinaryName": "vibelauncher-gui",
+  "version": "0.1.0",
+  "identifier": "io.github.gloridust.vibelauncher",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "VibeLauncher",
+        "width": 980,
+        "height": 660,
+        "minWidth": 760,
+        "minHeight": 520,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "nsis", "app", "dmg"],
+    "category": "Utility",
+    "shortDescription": "Separate profiles for the Claude and ChatGPT desktop apps",
+    "longDescription": "VibeLauncher opens the official Claude and ChatGPT desktop apps with separate profiles, each with its own sign-in and data. It doesn't modify, copy or redistribute the apps.",
+    "copyright": "© 2026 Ethan Zou. Not affiliated with Anthropic or OpenAI.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": { "section": "utils" }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "nsis": { "installMode": "currentUser", "installerHooks": "./windows/hooks.nsh" }
+    }
+  }
+}

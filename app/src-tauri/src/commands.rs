@@ -438,6 +438,19 @@ pub fn run(args: Vec<String>) {
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(|app| {
+            // Give the native frame the chosen theme before the window first
+            // appears: on Windows a later change from the page doesn't always
+            // repaint the title bar, which then stays light over a dark window.
+            if let (Ok(l), Some(w)) = (Launcher::open(), app.get_webview_window("main")) {
+                let theme = match l.config.settings.theme.as_str() {
+                    "dark" => Some(tauri::Theme::Dark),
+                    "light" => Some(tauri::Theme::Light),
+                    _ => None,
+                };
+                if theme.is_some() {
+                    let _ = w.set_theme(theme);
+                }
+            }
             // The page shows the window once it has drawn; this is the safety
             // net if it never does.
             let handle = app.handle().clone();

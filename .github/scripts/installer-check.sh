@@ -12,6 +12,11 @@
 #
 # Usage: installer-check.sh <target>   (expects target/<target>/release/vl-fake-app.exe)
 set -euo pipefail
+# Git Bash rewrites arguments that look like paths when it starts a Windows
+# program, so "/S" reached the installer as "S:/" and it opened its wizard
+# instead of installing silently. Pass every argument as written; paths that
+# Windows programs need are converted with cygpath -w below.
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 target=$1
 setup=$(ls target/"$target"/release/bundle/nsis/*-setup.exe | head -1)

@@ -237,6 +237,9 @@ button {
 .nav-item .count.red {
   background: var(--red);
 }
+.nav-item .count.accent {
+  background: var(--accent);
+}
 
 .section-head {
   display: flex;
@@ -1342,4 +1345,36 @@ textarea.field {
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
+}
+
+.progress {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+.progress > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s;
+}
+.progress > .indeterminate {
+  width: 30%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress > .indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
 }

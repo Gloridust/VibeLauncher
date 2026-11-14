@@ -94,6 +94,9 @@ pub struct StateView {
     profiles_dir: String,
     config_file: String,
     cli: String,
+    /// How this copy can update itself ("appimage", "deb", "rpm", "app",
+    /// "nsis"), or none for a build that isn't a package.
+    update_kind: Option<&'static str>,
 }
 
 fn platform() -> &'static str {
@@ -188,6 +191,7 @@ pub async fn get_state(st: State<'_, AppState>) -> Res<StateView> {
             profiles_dir: l.paths.profiles_dir.display().to_string(),
             config_file: l.paths.config_file().display().to_string(),
             cli: vl_core::paths::self_exe().display().to_string(),
+            update_kind: crate::update::install_kind(),
         })
     })
 }
@@ -452,7 +456,9 @@ pub fn run(args: Vec<String>) {
             show_main(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(crate::update::UpdateState::default())
         .setup(|app| {
             // Give the native frame the chosen theme before the window first
             // appears: on Windows a later change from the page doesn't always
@@ -505,6 +511,8 @@ pub fn run(args: Vec<String>) {
             open_website,
             opened_for_route,
             selftest_report,
+            crate::update::check_update,
+            crate::update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VibeLauncher");

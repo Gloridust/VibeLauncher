@@ -18,7 +18,7 @@ function loadCollapsed(): Record<string, boolean> {
 }
 
 export function Sidebar(props: { view: View; onSelect: (v: View) => void; onNew: () => void; issues: { warn: number; err: number } }) {
-  const { state, refresh, run } = useApp();
+  const { state, refresh, run, update } = useApp();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const [drag, setDrag] = useState<{ id: string; over?: string } | null>(null);
 
@@ -130,9 +130,13 @@ export function Sidebar(props: { view: View; onSelect: (v: View) => void; onNew:
         <button class={"nav-item" + (isActive({ kind: "settings" }) ? " active" : "")} onClick={() => props.onSelect({ kind: "settings" })}>
           <Gear />
           <span class="label">{t("nav.settings")}</span>
-          <span class="faint" style={{ fontSize: "11px" }}>
-            {state.version}
-          </span>
+          {update.phase === "available" ? (
+            <span class="count accent">{t("update.badge")}</span>
+          ) : (
+            <span class="faint" style={{ fontSize: "11px" }}>
+              {state.version}
+            </span>
+          )}
         </button>
       </div>
     </nav>

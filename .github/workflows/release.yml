@@ -16,6 +16,8 @@ on:
       - app/src-tauri/tauri.bundle.conf.json
       - app/src-tauri/windows/**
       - .github/scripts/installer-check.sh
+      - .github/scripts/update-files.sh
+      - .github/scripts/update-manifest.py
       - crates/vibelauncher/src/lib.rs
 
 permissions:
@@ -131,10 +133,47 @@ jobs:
             echo "No signing secrets for ${{ runner.os }}: building unsigned"
           fi
 
+      # The in-app updater only installs files signed with this key (its
+      # public half is in tauri.conf.json). A tagged release can't go out
+      # without it: users of the previous version would never hear of it.
+      - name: Update signing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > app/src-tauri/tauri.updater.conf.json
+            echo "UPDATER_CONFIG=--config src-tauri/tauri.updater.conf.json" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY isn't set; see docs/RELEASING.md"; exit 1
+          else
+            echo "UPDATER_CONFIG=" >> "$GITHUB_ENV"
+            echo "No update signing key: building without update files"
+          fi
+
       - name: Build the window and packages
         working-directory: app
         shell: bash
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG $UPDATER_CONFIG
+
+      - name: Gather the update files
+        if: env.UPDATER_CONFIG != ''
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash .github/scripts/update-files.sh ${{ matrix.target }}
+
+      - name: Keep the update files
+        if: env.UPDATER_CONFIG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-${{ matrix.target }}
+          path: update/${{ matrix.target }}.json
+          if-no-files-found: error
 
       # Install, upgrade and uninstall with the hooks in
       # app/src-tauri/windows/hooks.nsh, using a stand-in Claude.
@@ -190,6 +229,7 @@ jobs:
             target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            update/*.app.tar.gz
 
       - name: Keep the packages (manual runs)
         if: "!startsWith(github.ref, 'refs/tags/')"
@@ -203,3 +243,40 @@ jobs:
             target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
+
+  # latest.json, which the in-app updater reads from the latest release. Only
+  # written when every platform built: a partial one would quietly leave some
+  # users behind. On pull requests it is checked and kept as an artifact.
+  manifest:
+    name: Update manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-*
+          path: pieces
+          merge-multiple: true
+      - name: Write latest.json
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          if [ -z "$TAG" ] && ! ls pieces/*.json >/dev/null 2>&1; then
+            echo "No update files (the signing key isn't available to this run)"; exit 0
+          fi
+          tag=${TAG:-v$(jq -r .version app/src-tauri/tauri.conf.json)}
+          python3 .github/scripts/update-manifest.py pieces "$tag" "${{ github.repository }}" latest.json
+      - name: Upload to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: latest.json
+      - name: Keep it (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest.json
+          path: latest.json
+          if-no-files-found: ignore

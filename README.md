@@ -46,6 +46,8 @@ Official updates keep working exactly as before.
 - **Light by design** — a tiny launcher and a native window that only runs while you use it.
   Nothing stays in the background.
 - **Feels at home** — light and dark themes, English and Chinese, on all three systems.
+- **One-click updates** — when a new version of VibeLauncher is out, update and restart from
+  Settings. Every update is signed and checked before it is installed.
 
 ## Supported platforms
 
@@ -121,8 +123,10 @@ Install the `.deb` (`sudo apt install ./VibeLauncher_*.deb`) or `.rpm`
 <summary><b>Is my account safe?</b></summary>
 
 VibeLauncher never sees your password or session. Each profile signs in by itself, in the
-official app, and its data stays in its own folder on your computer. VibeLauncher makes no network
-requests of its own, and its log never records the codes inside sign-in links.
+official app, and its data stays in its own folder on your computer. The only request VibeLauncher
+makes is to ask GitHub whether a newer VibeLauncher is out, when its window opens; nothing about
+you or your profiles is sent, and you can turn it off in Settings. Its log never records the codes
+inside sign-in links.
 
 </details>
 
@@ -131,6 +135,16 @@ requests of its own, and its log never records the codes inside sign-in links.
 
 Yes. VibeLauncher only starts the app you installed; it doesn't change it. If an update restarts
 an app without its profile, Diagnostics notices and restarts it correctly.
+
+</details>
+
+<details>
+<summary><b>How do I update VibeLauncher?</b></summary>
+
+Open **Settings**. When a new version is out, **Update and restart** downloads it, checks its
+signature and installs it the same way you installed VibeLauncher (with the deb and rpm packages,
+your system asks for your password). The AppImage replaces itself. Profiles, shortcuts and
+sign-in links are kept.
 
 </details>
 

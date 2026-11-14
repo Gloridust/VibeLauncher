@@ -90,6 +90,8 @@ pub struct Settings {
     /// Manually chosen app executables, by provider id.
     pub app_overrides: BTreeMap<String, PathBuf>,
     pub onboarded: bool,
+    /// Look for a new version of VibeLauncher when the window opens.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -102,6 +104,7 @@ impl Default for Settings {
             theme: "auto".into(),
             app_overrides: BTreeMap::new(),
             onboarded: false,
+            check_updates: true,
         }
     }
 }

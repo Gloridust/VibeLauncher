@@ -82,6 +82,7 @@ export interface Settings {
   theme: "auto" | "light" | "dark";
   appOverrides: Record<string, string>;
   onboarded: boolean;
+  checkUpdates: boolean;
 }
 
 export type Platform = "linux" | "macos" | "windows";
@@ -95,7 +96,21 @@ export interface StateView {
   profilesDir: string;
   configFile: string;
   cli: string;
+  /** How this copy updates itself; none for a build that isn't a package. */
+  updateKind?: UpdateKind | null;
 }
+
+export type UpdateKind = "appimage" | "deb" | "rpm" | "app" | "nsis";
+
+export interface UpdateInfo {
+  version: string;
+  current: string;
+  notes?: string;
+  date?: string;
+}
+
+/** The error install_update gives when the password prompt was dismissed. */
+export const UPDATE_CANCELLED = "update-cancelled";
 
 export type Fix =
   | { kind: "claimScheme"; provider: Provider }
@@ -169,6 +184,8 @@ export const api = {
   reveal: (path: string) => call<void>("reveal", { path }),
   openWebsite: (page: "home" | "issues" | "releases") => call<void>("open_website", { page }),
   openedForRoute: () => call<boolean>("opened_for_route"),
+  checkUpdate: () => call<UpdateInfo | null>("check_update"),
+  installUpdate: () => call<void>("install_update"),
 };
 
 /** Subscribe to an event from the Rust side; no-op outside Tauri. */

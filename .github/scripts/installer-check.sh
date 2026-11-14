@@ -3,7 +3,8 @@
 # Claude (so VibeLauncher takes claude:// and adds a Start-menu shortcut), then
 # checks what the installer hooks (app/src-tauri/windows/hooks.nsh) do:
 #
-#   1. installing again silently keeps the link and the shortcut;
+#   1. installing again silently, and the way the in-app updater runs the
+#      installer, keeps the link and the shortcut;
 #   2. the old uninstaller run the way an upgrade runs it (in place) gives the
 #      link back and removes the shortcut, and installing afterwards puts both
 #      back;
@@ -86,6 +87,12 @@ check "creating a profile adds its shortcut" has_link
 
 echo "== install again (silent: nothing is uninstalled)"
 install
+check "the link is kept" ours
+check "the shortcut is kept" has_link
+
+echo "== in-app update (how the updater runs the installer: passive, update mode)"
+run "$setup" /P /UPDATE
+[ -x "$cli" ] || { echo "::error::nothing installed at $inst"; exit 1; }
 check "the link is kept" ours
 check "the shortcut is kept" has_link
 

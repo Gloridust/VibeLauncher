@@ -325,6 +325,10 @@ impl Launcher {
         let Some(inst) = self.install(provider) else { return };
         for wait in [3u64, 8, 20, 45] {
             std::thread::sleep(Duration::from_secs(wait));
+            // Routing may have been turned off meanwhile.
+            if self.reload().is_err() || !self.routing_wanted(provider) {
+                return;
+            }
             let _ = scheme::reassert(provider, &inst, &self.paths);
         }
     }
@@ -350,7 +354,12 @@ impl Launcher {
             let res = if self.routing_wanted(provider) {
                 match &inst {
                     Some(i) if st.supported && (!st.claimed || st.stale) => scheme::claim(provider, i, &self.paths),
-                    _ => Ok(()),
+                    _ => {
+                        if st.claimed {
+                            scheme::remember_claim(provider, &self.paths);
+                        }
+                        Ok(())
+                    }
                 }
             } else if st.claimed {
                 scheme::release(provider, inst.as_ref(), &self.paths)

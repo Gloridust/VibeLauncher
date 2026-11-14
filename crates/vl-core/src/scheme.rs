@@ -43,17 +43,47 @@ pub fn status(provider: ProviderKind, install: Option<&AppInstall>, paths: &Path
 }
 
 pub fn claim(provider: ProviderKind, install: &AppInstall, paths: &Paths) -> Result<()> {
-    imp::claim(provider, install, paths)
+    let _lock = lock(paths);
+    imp::claim(provider, install, paths)?;
+    remember_claim(provider, paths);
+    Ok(())
 }
 
 pub fn release(provider: ProviderKind, install: Option<&AppInstall>, paths: &Paths) -> Result<()> {
+    let _lock = lock(paths);
+    // Forget the claim first, so a re-claim still waiting after a launch
+    // doesn't take the scheme back.
+    let _ = std::fs::remove_file(claim_marker(provider, paths));
     imp::release(provider, install, paths)
 }
 
 /// Re-register after the app had a chance to reclaim the scheme. No-op where
-/// the app doesn't reclaim (Linux).
+/// the app doesn't reclaim (Linux), and once the scheme has been released.
 pub fn reassert(provider: ProviderKind, install: &AppInstall, paths: &Paths) -> Result<()> {
+    let _lock = lock(paths);
+    if !claim_marker(provider, paths).exists() {
+        return Ok(());
+    }
     imp::reassert(provider, install, paths)
+}
+
+/// Note that we hold the scheme (for claims made before the note existed).
+pub fn remember_claim(provider: ProviderKind, paths: &Paths) {
+    let _ = crate::paths::write_atomic(&claim_marker(provider, paths), b"");
+}
+
+fn claim_marker(provider: ProviderKind, paths: &Paths) -> PathBuf {
+    paths.state_dir.join(format!("scheme-claimed-{}", provider.id()))
+}
+
+/// Claims, releases and re-claims run in separate processes (the window, the
+/// command, the background re-claim after a launch); on macOS two of them
+/// rebuilding the router at once break each other. Held until dropped.
+fn lock(paths: &Paths) -> Option<std::fs::File> {
+    let _ = std::fs::create_dir_all(&paths.state_dir);
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(paths.state_dir.join("scheme.lock")).ok()?;
+    f.lock().ok()?;
+    Some(f)
 }
 
 pub fn needs_reassert() -> bool {

@@ -258,8 +258,12 @@ fn open_url(rest: &[String]) -> Result<ExitCode> {
 fn open_gui(args: &[String]) -> Result<()> {
     let gui = vl_core::paths::gui_exe()
         .ok_or_else(|| anyhow!("the VibeLauncher window (vibelauncher-gui) isn't installed next to this program"))?;
+    vl_core::launch::keep_std_handles_private();
     let mut c = std::process::Command::new(gui);
-    c.args(args).stdin(std::process::Stdio::null());
+    c.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

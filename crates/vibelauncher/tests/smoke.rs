@@ -353,7 +353,11 @@ fn smoke() {
     let personal_id = s.profile("Smoke Personal")["id"].as_str().unwrap().to_string();
 
     let n = s.launches().len();
+    let t = Instant::now();
     s.ok(&["launch", &work_id]);
+    // The app must not hold on to our output (on Windows it inherits every
+    // inheritable handle), or whoever reads it waits until the app quits.
+    assert!(t.elapsed() < Duration::from_secs(30), "`launch` waited for the app ({:?})", t.elapsed());
     let l = s.wait_launch("Smoke Work to start", n, |v| udd_of(v).is_some());
     assert!(same_dir(&udd_of(&l).unwrap(), &work_root.join("electron")), "wrong data folder: {l}");
     let ccd = l["env"]["CLAUDE_CONFIG_DIR"].as_str().expect("CLAUDE_CONFIG_DIR set");

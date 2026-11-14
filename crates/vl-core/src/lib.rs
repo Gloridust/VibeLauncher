@@ -304,6 +304,7 @@ impl Launcher {
         if !scheme::needs_reassert() || !self.routing_wanted(provider) {
             return;
         }
+        launch::keep_std_handles_private();
         let exe = paths::self_exe();
         let mut c = std::process::Command::new(exe);
         c.args(["internal-reassert", provider.id()])

@@ -7,9 +7,40 @@ use anyhow::{Context, Result};
 use crate::paths::create_private_dir;
 use crate::provider::LaunchSpec;
 
+/// Keep long-lived children from holding on to our own stdin/stdout/stderr.
+///
+/// Windows creates children with every inheritable handle of the parent,
+/// whatever their own stdio is set to. When VibeLauncher's output is a pipe
+/// (the window or a script running `vibelauncher launch` and reading what it
+/// prints), the app would keep that pipe open for as long as it runs, and the
+/// caller would wait until the app quits. Rust still hands a child our
+/// handles when it asks for `Stdio::inherit()` (it duplicates them).
+pub fn keep_std_handles_private() {
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetStdHandle(which: u32) -> *mut c_void;
+            fn SetHandleInformation(handle: *mut c_void, mask: u32, flags: u32) -> i32;
+        }
+        const HANDLE_FLAG_INHERIT: u32 = 1;
+        // STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE (-10, -11, -12).
+        for which in [-10i32, -11, -12] {
+            unsafe {
+                let h = GetStdHandle(which as u32);
+                if !h.is_null() && h as isize != -1 {
+                    SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+                }
+            }
+        }
+    }
+}
+
 /// Start the app described by `spec`. Returns once the process is spawned;
 /// VibeLauncher never waits for the app to exit.
 pub fn spawn(spec: &LaunchSpec) -> Result<()> {
+    keep_std_handles_private();
     for d in &spec.mkdirs {
         create_private_dir(d)?;
     }
@@ -27,6 +58,7 @@ pub fn spawn(spec: &LaunchSpec) -> Result<()> {
 /// Like [`spawn`] but waits for the process to exit (used when handing a URL
 /// to an already-running instance: the second process exits within seconds).
 pub fn run_and_wait(spec: &LaunchSpec, timeout: std::time::Duration) -> Result<bool> {
+    keep_std_handles_private();
     for d in &spec.mkdirs {
         create_private_dir(d)?;
     }

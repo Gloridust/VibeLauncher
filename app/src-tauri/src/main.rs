@@ -21,6 +21,17 @@ fn main() -> std::process::ExitCode {
     unsafe {
         libc::mallopt(libc::M_ARENA_MAX, 2);
     }
+    // On the NVIDIA driver, WebKitGTK's dmabuf renderer can leave the window
+    // see-through or garbled after it has been open a while. This window is
+    // small and mostly static, so drawing it the older way costs nothing.
+    // Set before any thread exists (set_var isn't thread-safe), and only when
+    // the user hasn't chosen a value themselves.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+        && std::path::Path::new("/proc/driver/nvidia/version").exists()
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     commands::run(args);
     std::process::ExitCode::SUCCESS
 }

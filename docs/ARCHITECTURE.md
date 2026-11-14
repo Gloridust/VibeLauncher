@@ -258,7 +258,8 @@ trait Platform {
 - 结果：Claude 查「我是不是默认处理程序」时答案是「是」，所以既不抢回，也不改变登录方式；而回调实际交给了启动器。
 - 应用菜单里的「Claude」图标也会走启动器，打开的是默认 Profile，与原来一样。
 - 官方包更新可能改 `.desktop`（加新的 Action），所以启动器每次运行都比对系统那份，内容变了就重新生成。
-- 撤销：删掉这个文件即可，不需要改 `mimeapps.list`。
+- **Claude 5.11 起自己也写这个文件**【实测，读 app.asar】：每次启动用系统那份加几个启动器菜单项（继续上次的 Claude Code 会话等），写到同一路径，并标 `X-Claude-Generated=true`。它只在文件不存在、或文件是它自己写的（带这个标记）时才写，遇到别人写的就跳过（日志 `user desktop entry present or unreadable; not writing`）。所以接管时遇到带标记的文件：把它备份到状态目录（`app-entry-<id>`），用「系统那份 + 它多出来的菜单项」生成我们的覆盖文件（不带它的标记），之后 Claude 就不再改它；撤销时删掉我们的、放回备份。0.1.0 把这个文件当成别人的而拒绝覆盖，导致接管失败、登录回调直接进了默认 Profile。
+- 撤销：删掉这个文件（有备份就放回 Claude 自己那份）即可，不需要改 `mimeapps.list`。
 - ChatGPT 同理覆盖 `chatgpt.desktop`。但它还声明了 `http/https`，覆盖后这些链接也会先到启动器，启动器要把非 `codex://` 的 URL 原样转给默认 Profile。是否需要接管 ChatGPT，取决于它登录是否走 `codex://`（第 2 节，待查）。
 
 **macOS【未验证】**

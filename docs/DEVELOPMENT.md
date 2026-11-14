@@ -19,7 +19,9 @@ To route sign-in links, VibeLauncher stands in for the app's link handler only w
 isolated profiles of it, and hands it back when you turn routing off:
 
 - **Linux:** a same-named desktop entry in `~/.local/share/applications` that runs VibeLauncher
-  and falls back to the app if VibeLauncher is gone. The system file is never edited.
+  and falls back to the app if VibeLauncher is gone. The system file is never edited. Claude
+  writes its own copy of that entry on every start; VibeLauncher replaces it (keeping its extra
+  menu actions), Claude then leaves it alone, and the app's copy is put back on release.
 - **macOS:** a tiny router app registered for the scheme, which falls back to the app if
   VibeLauncher is gone.
 - **Windows:** the per-user (`HKCU`) handler, with the previous value backed up. The installer

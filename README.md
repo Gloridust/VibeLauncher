@@ -44,10 +44,14 @@ updates keep working exactly as before.
 | | Claude | ChatGPT | Sign-in routing |
 |---|---|---|---|
 | **Linux** | ✅ tested | ✅ lightly tested | ✅ |
-| **macOS** | implemented, needs testing | implemented, needs testing | experimental |
-| **Windows** | implemented, needs testing | implemented, needs testing | experimental |
+| **macOS** | passes CI end to end; not yet tried with a real account | same | experimental |
+| **Windows** | passes CI end to end; not yet tried with a real account | same | experimental |
 
-Reports from macOS and Windows are very welcome — please [open an issue](https://github.com/Gloridust/VibeLauncher/issues).
+On every change, CI runs the whole flow on all three systems with a stand-in for the app: it
+creates profiles, launches, checks each profile is recognised, quits every copy, catches an instance
+that lost its settings, and has the system itself deliver a sign-in link through VibeLauncher. What
+CI can't check is a real sign-in with the real apps on macOS and Windows; reports are very
+welcome — please [open an issue](https://github.com/Gloridust/VibeLauncher/issues).
 
 ## Install
 
@@ -56,6 +60,13 @@ Download a package from [Releases](https://github.com/Gloridust/VibeLauncher/rel
 - **Linux:** `.deb` or `.rpm` (recommended), or the `.AppImage`.
 - **macOS:** `.dmg` (Apple silicon and Intel).
 - **Windows:** the `-setup.exe` installer (per-user, no admin rights).
+
+The macOS and Windows packages aren't code-signed yet, so the system asks once before opening them:
+
+- **macOS:** drag VibeLauncher to Applications, then right-click it and choose **Open** (or allow it
+  under System Settings → Privacy & Security). If macOS says the app is damaged, run
+  `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`.
+- **Windows:** if SmartScreen appears, choose **More info → Run anyway**.
 
 Or build it yourself — see [Building](#building).
 
@@ -176,6 +187,6 @@ VibeLauncher 让官方 Claude 和 ChatGPT 桌面版拥有多个**互相独立的
 
 **已知限制**：Claude 的 Cowork 虚拟机属于系统账户而不是配置，同一时间只有一个配置能用；部分全局开关（如文件管理器里的“用 Claude 打开”）是共享的；终端里的 `codex` 命令仍使用默认账号（`~/.codex`）；它依赖官方应用目前的行为，若更新改变了这些行为，“诊断”会提示。
 
-macOS 和 Windows 的支持已经实现，但还需要真机测试，欢迎反馈。
+macOS 和 Windows 上，CI 每次改动都会用替身应用跑通完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交登录链接），但还没有用真实账号登录过，欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
 
 本项目与 Anthropic、OpenAI 无关。

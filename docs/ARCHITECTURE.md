@@ -229,7 +229,7 @@ trait Platform {
 
 - Linux：`fork` + `setsid` 脱离启动器，`stdin/stdout` 接到 `/dev/null`，带上 `env` 和参数直接执行二进制。不经过 shell，参数不用转义。
 - macOS【未验证】：首选 `open -n -a <App路径> --env K=V … --args --user-data-dir=…`（`-n` 才会开新实例）。若 Claude 收不到环境变量，改为直接执行 `Claude.app/Contents/MacOS/Claude`（代价是 Dock 行为可能不同），两种都实测后再定。
-- Windows【未验证】：`CreateProcess` 带环境块；`DETACHED_PROCESS`。
+- Windows（CI 用替身应用验证过）：`CreateProcess` 带环境块；`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`。⚠️ Windows 的子进程会继承父进程**所有**可继承句柄，不管它自己的 stdio 设成什么；启动前要先把我们自己的 stdin/stdout/stderr 设成不可继承（`launch::keep_std_handles_private`），否则应用会一直攥着调用方读输出用的管道，调用方（窗口、脚本、测试）就得等到应用退出才返回。另外 `canonicalize` 在 Windows 上返回 `\\?\C:\…` 形式；写进注册表、快捷方式和命令行的路径必须先还原成普通形式（`paths::plain`），否则 Shell 运行链接处理程序时会弹错误框，登录链接永远回不来。
 
 启动前统一检查：应用还在吗、版本在实测范围内吗、这个 Profile 是不是已经在运行（在运行就只是转交 URL / 把窗口调到前面）。
 
@@ -413,9 +413,11 @@ docs/              本文档
 ### 12.4 测试
 
 - **核心单元测试**（`cargo test -p vl-core -p vibelauncher`，CI 在三平台跑）：路由算法（标记过期、多实例、只有一个实例等）、配置读写、`.desktop` 解析与改写、asar 版本读取、命令行解析。
-- **真实窗口**：用私有 `VIBELAUNCHER_HOME` 和 `XDG_*` 目录启动 `vibelauncher-gui`，放进限内存的 `systemd-run --user --scope`，用 `xdotool` + `import` 截图。不会碰系统里真正的链接处理程序和应用菜单。
+- **端到端**（`crates/vibelauncher/tests/smoke.rs`，`--features smoke-test`，CI 在 Linux、macOS、Windows 的真机上跑）：用一个假应用 `vl-fake-app` 代替 Claude（它记下自己拿到的参数和环境变量），走一遍新建配置 → 启动（检查 `--user-data-dir` 和 `CLAUDE_CONFIG_DIR`）→ 退出 → 模拟「更新后丢了环境变量」被诊断发现并修复 → 登录链接转交 → 接管链接 → **由系统本身**（`gio open` / `open` / `start`）打开一个 `claude://` 链接，确认它经 VibeLauncher 到了发起登录的配置 → 交还链接 → 删除配置。`VL_SMOKE=sandbox` 把一切放在临时目录里，本机也能跑；`VL_SMOKE=ci` 用真实的用户目录，只在 CI 的一次性机器上用。
+- **真实窗口**：用私有 `VIBELAUNCHER_HOME` 和 `XDG_*` 目录，在 Xvfb 上用私有 D-Bus 会话启动 `vibelauncher-gui`，放进限内存的 `systemd-run --user --scope`，用 `xdotool` 点击、`import` 截图，把每个流程走一遍（新建、登录并粘贴链接、打开、退出、编辑、删除正在运行的配置、诊断与修复、设置里切中文和深色、键盘操作）。不会碰系统里真正的链接处理程序和应用菜单。
 - **界面**：`pnpm dev` 下用假的后端（`app/src/mock.ts`，只在开发模式加载），`?scenario=busy|fresh|noapps|route`、`&lang=zh`、`&theme=dark`、`&platform=macos` 覆盖各种状态。
-- 还没做：Linux CI 上的「覆盖文件 → `gio open` → 路由 → 转交」集成测试；对官方新版本自动跑一遍第 2 节实验的兼容性脚本。
+- **打包**：`release.yml` 在改动打包配置的 PR 上也会跑，四个目标（Linux x86_64、Windows x86_64、macOS Apple 芯片和 Intel）都要打包成功。
+- 还没做：macOS、Windows 上用**真正的 Claude** 登录（CI 上没有账号，只能用假应用）；对官方新版本自动跑一遍第 2 节实验的兼容性脚本。
 
 ### 12.5 实测体积与内存（Linux，2026-11-14）
 

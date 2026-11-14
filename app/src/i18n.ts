@@ -450,10 +450,24 @@ export function relativeTime(iso?: string): string {
   return new Date(iso).toLocaleDateString(lang === "zh" ? "zh-CN" : undefined);
 }
 
+// The link log is written in English by the command; these are its fixed phrases.
+const logZh: [RegExp, string][] = [
+  [/^login started for (.+)$/, "$1 开始登录"],
+  [/→ asking the user$/, "→ 询问用户"],
+  [/\(a login was started from this profile\)$/, "（登录是从这个配置发起的）"],
+  [/\(it is the only one running\)$/, "（只有它在运行）"],
+  [/\(it was used most recently\)$/, "（最近用过它）"],
+  [/\(no other profile applies\)$/, "（没有别的配置适用）"],
+  [/\(chosen by you\)$/, "（由你选择）"],
+  [/\(pasted\)$/, "（手动粘贴）"],
+  [/^error: /, "出错："],
+];
+
 /** A link-log line starts with a UTC timestamp; show it in local time. */
 export function localizeLogLine(line: string): string {
   const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)\s+(.*)$/.exec(line);
   if (!m) return line;
+  if (lang === "zh") for (const [re, to] of logZh) m[2] = m[2].replace(re, to);
   const d = new Date(m[1]);
   if (Number.isNaN(d.getTime())) return line;
   const locale = lang === "zh" ? "zh-CN" : undefined;

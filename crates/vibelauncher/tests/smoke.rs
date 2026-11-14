@@ -109,8 +109,38 @@ impl Smoke {
     fn wait_running(&self, name: &str, want: bool) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while self.profile(name)["running"] != want {
-            assert!(Instant::now() < deadline, "{name} running should become {want}");
+            if Instant::now() >= deadline {
+                self.dump_processes();
+                panic!("{name} running should become {want}");
+            }
             std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    /// What VibeLauncher and the OS each see, for a failed wait.
+    fn dump_processes(&self) {
+        let _ = self.cmd(&["ps"]);
+        eprintln!("stand-in launches: {:#?}", self.launches());
+        let os = if cfg!(target_os = "windows") {
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'Claude*' } | Format-List ProcessId,ParentProcessId,ExecutablePath,CommandLine",
+                ])
+                .output()
+        } else {
+            Command::new("ps").args(["-eo", "pid,ppid,args"]).output()
+        };
+        if let Ok(o) = os {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let app = self.app_dir.display().to_string();
+            let lines: Vec<&str> = if cfg!(target_os = "windows") {
+                text.lines().collect()
+            } else {
+                text.lines().filter(|l| l.contains(&app)).collect()
+            };
+            eprintln!("OS process list:\n{}", lines.join("\n"));
         }
     }
 

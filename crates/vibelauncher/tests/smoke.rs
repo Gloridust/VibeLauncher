@@ -144,6 +144,36 @@ impl Smoke {
             eprintln!("$ vibelauncher ps\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
         }
         eprintln!("stand-in launches: {:#?}", self.launches());
+        if let Ok(rd) = std::fs::read_dir(&self.app_dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n.starts_with("fake-app-alive-") || n.starts_with("fake-app-panic-") {
+                    eprintln!("{n}: {}", std::fs::read_to_string(e.path()).unwrap_or_default());
+                }
+            }
+        }
+        // Control: a copy started straight from the test, then scanned again.
+        #[cfg(target_os = "windows")]
+        if let Some(udd) = self.launches().first().and_then(udd_of) {
+            if let Ok(mut c) = Command::new(self.app_dir.join(exe_name())).arg(format!("--user-data-dir={udd}")).spawn() {
+                std::thread::sleep(Duration::from_secs(3));
+                let mut ps = Command::new(CMD);
+                ps.arg("ps").env("VIBELAUNCHER_DEBUG_PROCS", "1");
+                for (k, v) in &self.vars {
+                    ps.env(k, v);
+                }
+                if let Ok(o) = ps.output() {
+                    eprintln!(
+                        "control copy pid {} alive={:?}\n$ vibelauncher ps\n{}{}",
+                        c.id(),
+                        c.try_wait().map(|s| s.is_none()),
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                }
+                let _ = c.kill();
+            }
+        }
         let os = if cfg!(target_os = "windows") {
             Command::new("powershell")
                 .args([

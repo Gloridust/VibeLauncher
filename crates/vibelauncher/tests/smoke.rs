@@ -185,11 +185,22 @@ fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, _mode: &str) ->
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>9.9.9</string>
 <key>LSUIElement</key><true/>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>VLSmokeClaude</string>
+<key>CFBundleURLSchemes</key><array><string>claude</string></array>
+</dict></array>
 </dict></plist>
 "#,
     )
     .unwrap();
     let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).status();
+    // Like the real app, it declares claude:// and Launch Services knows it.
+    let _ = Command::new(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+    )
+    .arg("-f")
+    .arg(&bundle)
+    .status();
     (dir, bundle)
 }
 
@@ -269,9 +280,15 @@ fn smoke() {
         "a correctly started profile was reported as lost"
     );
 
-    // ── quit ──
+    // ── quit stops every copy of the profile, not just the first ──
+    let mut second = Command::new(s.app_dir.join(exe_name()))
+        .arg(format!("--user-data-dir={}", work_root.join("electron").display()))
+        .env("CLAUDE_CONFIG_DIR", work_root.join("claude-config"))
+        .spawn()
+        .expect("start a second copy");
     s.ok(&["quit", &work_id]);
     s.wait_running("Smoke Work", false);
+    let _ = second.wait();
 
     // ── an update relaunch that loses CLAUDE_CONFIG_DIR is detected and fixed ──
     let udd = format!("--user-data-dir={}", work_root.join("electron").display());
@@ -319,6 +336,9 @@ fn smoke() {
     s.ok(&["scheme", "release", "claude"]);
     let status = s.json(&["scheme", "status", "claude"]);
     assert_eq!(status["claimed"], false, "still claimed: {status}");
+    // The stand-in declares claude:// like the real app, so it gets it back.
+    #[cfg(target_os = "macos")]
+    assert_eq!(status["handler"], "io.github.gloridust.vlsmoke.claude", "the app didn't get its links back: {status}");
 
     // ── shortcuts ──
     let shortcut = shortcut_for(&s, "Smoke Personal", &personal_id);

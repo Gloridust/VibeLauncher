@@ -463,18 +463,34 @@ mod imp {
         h.is_some_and(|h| h.eq_ignore_ascii_case(ROUTER_BUNDLE_ID))
     }
 
-    /// The main schemes (other than `except`) currently routed to us.
-    fn claimed_schemes(except: &str) -> Vec<&'static str> {
-        ProviderKind::ALL
-            .iter()
-            .map(|p| p.schemes()[0])
-            .filter(|s| *s != except && is_router(current_handler(s).as_deref()))
-            .collect()
+    /// The schemes the router app was built to declare: what has been
+    /// claimed, independent of which app Launch Services prefers right now
+    /// (the apps take their scheme back when they start).
+    fn declared_schemes(paths: &Paths) -> Vec<String> {
+        let plist = router_app(paths).join("Contents/Info.plist");
+        if !plist.exists() {
+            return Vec::new();
+        }
+        Command::new("/usr/bin/plutil")
+            .args(["-extract", "CFBundleURLTypes.0.CFBundleURLSchemes", "json", "-o", "-"])
+            .arg(&plist)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| serde_json::from_slice::<Vec<String>>(&o.stdout).ok())
+            .unwrap_or_default()
+    }
+
+    fn with_scheme(mut list: Vec<String>, scheme: &str) -> Vec<String> {
+        if !list.iter().any(|s| s == scheme) {
+            list.push(scheme.to_string());
+        }
+        list
     }
 
     /// Build the router declaring exactly `schemes`, so a scheme we let go of
     /// isn't still claimed by it.
-    fn build_router(paths: &Paths, schemes: &[&str]) -> Result<PathBuf> {
+    fn build_router(paths: &Paths, schemes: &[String]) -> Result<PathBuf> {
         let app = router_app(paths);
         let exe = crate::paths::self_exe();
         let script = format!(
@@ -531,9 +547,7 @@ mod imp {
                 crate::paths::write_atomic(&backup_file(paths, scheme), prev.as_bytes())?;
             }
         }
-        let mut schemes = claimed_schemes(scheme);
-        schemes.push(scheme);
-        build_router(paths, &schemes)?;
+        build_router(paths, &with_scheme(declared_schemes(paths), scheme))?;
         set_handler(scheme, ROUTER_BUNDLE_ID)
     }
 
@@ -547,17 +561,16 @@ mod imp {
             None => Ok(()),
         };
         let _ = std::fs::remove_file(backup_file(paths, scheme));
-        // Nothing to hand back to (or it was refused): stop declaring the
-        // scheme, so Launch Services falls back to whatever else handles it.
-        if is_router(current_handler(scheme).as_deref()) {
-            let rest = claimed_schemes(scheme);
-            if rest.is_empty() {
-                remove_router(paths);
-            } else {
-                build_router(paths, &rest)?;
-            }
+        // Stop declaring the scheme, so that with nothing to hand back to,
+        // Launch Services falls back to whatever else handles it.
+        let declared = declared_schemes(paths);
+        let rest: Vec<String> = declared.iter().filter(|s| *s != scheme).cloned().collect();
+        if rest.is_empty() {
+            remove_router(paths);
+        } else if rest.len() != declared.len() {
+            build_router(paths, &rest)?;
         }
-        if is_router(current_handler(scheme).as_deref()) {
+        if router_app(paths).exists() && is_router(current_handler(scheme).as_deref()) {
             restored?;
             bail!("macOS still sends {scheme}:// links to VibeLauncher; choose another app for them in that app's settings");
         }
@@ -566,10 +579,9 @@ mod imp {
 
     pub fn reassert(provider: ProviderKind, _install: &AppInstall, paths: &Paths) -> Result<()> {
         let scheme = provider.schemes()[0];
-        if !router_app(paths).exists() {
-            let mut schemes = claimed_schemes(scheme);
-            schemes.push(scheme);
-            build_router(paths, &schemes)?;
+        let declared = declared_schemes(paths);
+        if !router_app(paths).exists() || !declared.iter().any(|s| s == scheme) {
+            build_router(paths, &with_scheme(declared, scheme))?;
         }
         if let Some(prev) = current_handler(scheme) {
             if !prev.eq_ignore_ascii_case(ROUTER_BUNDLE_ID) {

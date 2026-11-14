@@ -192,7 +192,8 @@ impl Launcher {
         if apps.is_empty() {
             return Ok(false);
         }
-        Ok(apps.iter().map(|a| procs::terminate(a.pid)).any(|x| x))
+        // Every copy, not just the first (`any` would stop early).
+        Ok(apps.iter().fold(false, |sent, a| procs::terminate(a.pid) || sent))
     }
 
     /// Quit the given profiles, wait for them to exit, then start them one by

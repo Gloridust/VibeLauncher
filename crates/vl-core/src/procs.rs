@@ -261,7 +261,8 @@ pub fn normalize_cmd(cmd: Vec<String>) -> Vec<String> {
 /// environment block, so the first entry must be a real variable.
 fn parse_environ(env: &[std::ffi::OsString]) -> Option<HashMap<String, String>> {
     let valid_key = |k: &str| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    let first = env.first()?.to_string_lossy();
+    // Windows starts the block with hidden per-drive entries (`=C:=C:\…`).
+    let first = env.iter().find(|kv| !kv.to_string_lossy().starts_with('='))?.to_string_lossy();
     if !first.split_once('=').is_some_and(|(k, _)| valid_key(k)) {
         return None;
     }
@@ -273,7 +274,8 @@ fn parse_environ(env: &[std::ffi::OsString]) -> Option<HashMap<String, String>> 
             valid_key(k).then(|| (k.to_string(), v.to_string()))
         })
         .collect();
-    (m.contains_key("PATH") || m.contains_key("HOME")).then_some(m)
+    // Windows spells it `Path`.
+    m.keys().any(|k| k.eq_ignore_ascii_case("PATH") || k == "HOME").then_some(m)
 }
 
 /// The value of `--user-data-dir` (either `--user-data-dir=X` or `--user-data-dir X`).
@@ -340,6 +342,19 @@ pub fn terminate(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_environment_block() {
+        let env: Vec<std::ffi::OsString> = ["=C:=C:\\work", "=ExitCode=00000000", "ALLUSERSPROFILE=C:\\ProgramData", "Path=C:\\Windows", "CLAUDE_CONFIG_DIR=C:\\p\\claude-config"]
+            .iter()
+            .map(Into::into)
+            .collect();
+        let m = parse_environ(&env).expect("a Windows block is readable");
+        assert_eq!(m.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("C:\\p\\claude-config"));
+        // A block whose start was overwritten (Chromium's process title) still isn't.
+        let bad: Vec<std::ffi::OsString> = ["claude --type=renderer", "PATH=/usr/bin"].iter().map(Into::into).collect();
+        assert!(parse_environ(&bad).is_none());
+    }
 
     #[test]
     fn udd_forms() {

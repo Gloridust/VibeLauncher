@@ -34,7 +34,7 @@ run() {
   timeout 180 "$@" || rc=$?
   if [ $rc = 124 ]; then
     echo "::error::timed out: $*" >&2
-    tasklist //v | grep -iE 'vibelauncher|setup|uninstall|Au_|Claude' >&2 || true
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CreationDate -gt (Get-Date).AddMinutes(-5) } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | Format-List" >&2 || true
     exit 1
   fi
   return $rc

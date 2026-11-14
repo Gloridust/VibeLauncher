@@ -47,11 +47,13 @@ updates keep working exactly as before.
 | **macOS** | passes CI end to end; not yet tried with a real account | same | experimental |
 | **Windows** | passes CI end to end; not yet tried with a real account | same | experimental |
 
-On every change, CI runs the whole flow on all three systems with a stand-in for the app: it
-creates profiles, launches, checks each profile is recognised, quits every copy, catches an instance
-that lost its settings, and has the system itself deliver a sign-in link through VibeLauncher. What
-CI can't check is a real sign-in with the real apps on macOS and Windows; reports are very
-welcome — please [open an issue](https://github.com/Gloridust/VibeLauncher/issues).
+On every change, CI runs the whole command-line flow on all three systems, for both apps, with
+stand-ins for them: it creates profiles, launches, checks each profile is recognised, quits every
+copy, catches an instance that lost its settings, and has the system itself deliver a sign-in link
+(`claude://`, `codex://`) through VibeLauncher. What CI can't check on macOS and Windows is a real
+sign-in with the real apps, and the manager window (it is built and packaged there, but only
+tried by hand on Linux). Reports are very welcome — please
+[open an issue](https://github.com/Gloridust/VibeLauncher/issues).
 
 ## Install
 
@@ -187,6 +189,6 @@ VibeLauncher 让官方 Claude 和 ChatGPT 桌面版拥有多个**互相独立的
 
 **已知限制**：Claude 的 Cowork 虚拟机属于系统账户而不是配置，同一时间只有一个配置能用；部分全局开关（如文件管理器里的“用 Claude 打开”）是共享的；终端里的 `codex` 命令仍使用默认账号（`~/.codex`）；它依赖官方应用目前的行为，若更新改变了这些行为，“诊断”会提示。
 
-macOS 和 Windows 上，CI 每次改动都会用替身应用跑通完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交登录链接），但还没有用真实账号登录过，欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
+macOS 和 Windows 上，CI 每次改动都会用替身应用为 Claude 和 ChatGPT 跑通命令行的完整流程（创建、启动、识别、退出、检测丢失设置、由系统转交 `claude://` / `codex://` 登录链接），但还没有用真实账号登录过；管理窗口在这两个平台上能构建打包，只在 Linux 上手动用过。欢迎反馈。这两个平台的安装包暂未签名：macOS 上右键应用选“打开”（提示“已损坏”时运行 `xattr -dr com.apple.quarantine /Applications/VibeLauncher.app`），Windows 上在 SmartScreen 里选“更多信息 → 仍要运行”。
 
 本项目与 Anthropic、OpenAI 无关。

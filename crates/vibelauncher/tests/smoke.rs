@@ -29,6 +29,9 @@ struct Smoke {
     app_dir: PathBuf,
     /// What Settings → "Choose…" would store for Claude.
     app_path: PathBuf,
+    /// The same two for the ChatGPT stand-in.
+    chat_dir: PathBuf,
+    chat_path: PathBuf,
     /// Whether to test that the OS routes a link through VibeLauncher.
     os_dispatch: bool,
 }
@@ -37,10 +40,12 @@ impl Drop for Smoke {
     /// Stop any stand-in still running, also when the test failed.
     fn drop(&mut self) {
         let _ = std::fs::write(self.app_dir.join("fake-app-stop"), "");
+        let _ = std::fs::write(self.chat_dir.join("fake-app-stop"), "");
         std::thread::sleep(Duration::from_millis(500));
         #[cfg(target_os = "macos")]
         if let Some(parent) = self.app_path.parent().filter(|p| p.to_string_lossy().contains("/Applications/VLSmoke-")) {
             let _ = Command::new(LSREGISTER).arg("-u").arg(&self.app_path).status();
+            let _ = Command::new(LSREGISTER).arg("-u").arg(&self.chat_path).status();
             let _ = std::fs::remove_dir_all(parent);
         }
     }
@@ -61,9 +66,10 @@ impl Smoke {
         if mode == "sandbox" {
             vars.push(("VIBELAUNCHER_HOME".into(), root.join("home").display().to_string()));
         }
-        let (app_dir, app_path) = make_fake_app(&root, &mut vars, mode);
+        let (app_dir, app_path) = make_fake_app(&root, &mut vars, mode, &CLAUDE);
+        let (chat_dir, chat_path) = make_fake_app(&root, &mut vars, mode, &CHATGPT);
         let os_dispatch = mode == "ci" || cfg!(target_os = "linux");
-        Self { _tmp: tmp, vars, app_dir, app_path, os_dispatch }
+        Self { _tmp: tmp, vars, app_dir, app_path, chat_dir, chat_path, os_dispatch }
     }
 
     fn cmd(&self, args: &[&str]) -> Output {
@@ -103,23 +109,12 @@ impl Smoke {
     }
 
     fn launches(&self) -> Vec<Value> {
-        std::fs::read_to_string(self.app_dir.join("fake-app-log.jsonl"))
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect()
+        launches_in(&self.app_dir)
     }
 
-    /// Wait for the stand-in to be started in a way `pred` accepts.
+    /// Wait for the Claude stand-in to be started in a way `pred` accepts.
     fn wait_launch(&self, what: &str, since: usize, pred: impl Fn(&Value) -> bool) -> Value {
-        let deadline = Instant::now() + Duration::from_secs(40);
-        loop {
-            if let Some(v) = self.launches().into_iter().skip(since).find(|v| pred(v)) {
-                return v;
-            }
-            assert!(Instant::now() < deadline, "timed out waiting for: {what}\nlaunches: {:#?}", self.launches());
-            std::thread::sleep(Duration::from_millis(300));
-        }
+        wait_launch_in(&self.app_dir, what, since, pred)
     }
 
     fn wait_running(&self, name: &str, want: bool) {
@@ -203,6 +198,43 @@ impl Smoke {
     }
 }
 
+/// How the stand-in in `dir` was started, one record per start.
+fn launches_in(dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("fake-app-log.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
+/// Wait for the stand-in in `dir` to be started in a way `pred` accepts.
+fn wait_launch_in(dir: &Path, what: &str, since: usize, pred: impl Fn(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        if let Some(v) = launches_in(dir).into_iter().skip(since).find(|v| pred(v)) {
+            return v;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for: {what}\nlaunches: {:#?}", launches_in(dir));
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
+/// The two apps the stand-ins play.
+#[allow(dead_code)] // each OS uses some of the fields
+struct Fake {
+    /// `claude` / `chatgpt`, as the `--app` option and `scheme` commands take it.
+    id: &'static str,
+    /// Display name, as in Launch Services and desktop entries.
+    name: &'static str,
+    scheme: &'static str,
+    /// Executable name on Linux and Windows (one the process scan knows).
+    linux_exe: &'static str,
+    windows_exe: &'static str,
+}
+
+const CLAUDE: Fake = Fake { id: "claude", name: "Claude", scheme: "claude", linux_exe: "claude-desktop", windows_exe: "Claude.exe" };
+const CHATGPT: Fake = Fake { id: "chatgpt", name: "ChatGPT", scheme: "codex", linux_exe: "chatgpt", windows_exe: "ChatGPT.exe" };
+
 fn args_of(v: &Value) -> Vec<String> {
     v["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_string()).collect()
 }
@@ -219,26 +251,31 @@ fn same_dir(a: &str, b: &Path) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn make_fake_app(root: &Path, vars: &mut Vec<(String, String)>, mode: &str) -> (PathBuf, PathBuf) {
+fn make_fake_app(root: &Path, vars: &mut Vec<(String, String)>, mode: &str, app: &Fake) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
-    let dir = root.join("app");
+    let dir = app_dir_for(root, app);
     std::fs::create_dir_all(&dir).unwrap();
-    let exe = dir.join("claude-desktop");
+    let exe = dir.join(app.linux_exe);
     std::fs::copy(FAKE, &exe).unwrap();
     std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     // The app's "system" desktop entry, in a data dir of its own so the
     // per-user shadow entry VibeLauncher writes is a separate file.
     let sys = root.join("sysdata");
     std::fs::create_dir_all(sys.join("applications")).unwrap();
-    let entry = sys.join("applications/vl-smoke-claude.desktop");
+    let entry = sys.join(format!("applications/vl-smoke-{}.desktop", app.id));
     std::fs::write(
         &entry,
         format!(
-            "[Desktop Entry]\nType=Application\nName=Claude\nExec={} %u\nMimeType=x-scheme-handler/claude;\n",
-            exe.display()
+            "[Desktop Entry]\nType=Application\nName={}\nExec={} %u\nMimeType=x-scheme-handler/{};\n",
+            app.name,
+            exe.display(),
+            app.scheme
         ),
     )
     .unwrap();
+    if app.id != "claude" {
+        return (dir, entry);
+    }
     let base = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     vars.push(("XDG_DATA_DIRS".into(), format!("{}:{base}", sys.display())));
     if mode == "sandbox" {
@@ -252,7 +289,7 @@ fn make_fake_app(root: &Path, vars: &mut Vec<(String, String)>, mode: &str) -> (
 }
 
 #[cfg(target_os = "macos")]
-fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, mode: &str) -> (PathBuf, PathBuf) {
+fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, mode: &str, app: &Fake) -> (PathBuf, PathBuf) {
     // In CI, where a real install would be: Launch Services may not name an
     // app inside a temporary folder as a scheme's default.
     let parent = if mode == "ci" {
@@ -260,42 +297,57 @@ fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, mode: &str) -> 
     } else {
         root.to_path_buf()
     };
-    let bundle = parent.join("VLSmokeClaude.app");
+    let exe = format!("VLSmoke{}", app.name);
+    let bundle = parent.join(format!("{exe}.app"));
     let dir = bundle.join("Contents/MacOS");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::copy(FAKE, dir.join("VLSmokeClaude")).unwrap();
+    std::fs::copy(FAKE, dir.join(&exe)).unwrap();
     std::fs::write(
         bundle.join("Contents/Info.plist"),
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>VLSmokeClaude</string>
-<key>CFBundleIdentifier</key><string>io.github.gloridust.vlsmoke.claude</string>
-<key>CFBundleName</key><string>VLSmokeClaude</string>
+<key>CFBundleExecutable</key><string>{exe}</string>
+<key>CFBundleIdentifier</key><string>{bundle_id}</string>
+<key>CFBundleName</key><string>{exe}</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>9.9.9</string>
 <key>LSUIElement</key><true/>
 <key>CFBundleURLTypes</key><array><dict>
-<key>CFBundleURLName</key><string>VLSmokeClaude</string>
-<key>CFBundleURLSchemes</key><array><string>claude</string></array>
+<key>CFBundleURLName</key><string>{exe}</string>
+<key>CFBundleURLSchemes</key><array><string>{scheme}</string></array>
 </dict></array>
 </dict></plist>
 "#,
+            bundle_id = fake_bundle_id(app),
+            scheme = app.scheme
+        ),
     )
     .unwrap();
     let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).status();
-    // Like the real app, it declares claude:// and Launch Services knows it.
+    // Like the real app, it declares its scheme and Launch Services knows it.
     let _ = Command::new(LSREGISTER).arg("-f").arg(&bundle).status();
     (dir, bundle)
 }
 
+#[cfg(target_os = "macos")]
+fn fake_bundle_id(app: &Fake) -> String {
+    format!("io.github.gloridust.vlsmoke.{}", app.id)
+}
+
 #[cfg(target_os = "windows")]
-fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, _mode: &str) -> (PathBuf, PathBuf) {
-    let dir = root.join("app");
+fn make_fake_app(root: &Path, _vars: &mut Vec<(String, String)>, _mode: &str, app: &Fake) -> (PathBuf, PathBuf) {
+    let dir = app_dir_for(root, app);
     std::fs::create_dir_all(&dir).unwrap();
-    let exe = dir.join("Claude.exe");
+    let exe = dir.join(app.windows_exe);
     std::fs::copy(FAKE, &exe).unwrap();
     (dir, exe)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_dir_for(root: &Path, app: &Fake) -> PathBuf {
+    if app.id == "claude" { root.join("app") } else { root.join(format!("app-{}", app.id)) }
 }
 
 /// Ask the OS to open a link, the way a browser does after sign-in.
@@ -320,7 +372,7 @@ fn os_open(s: &Smoke, url: &str) -> bool {
     for (k, v) in &s.vars {
         c.env(k, v);
     }
-    // The shell can stop on an error box nobody will click; don't wait forever.
+    // The shell can get stuck (it did with a `\\?\` handler path); don't wait forever.
     c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     let mut child = c.spawn().expect("open link");
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -351,10 +403,15 @@ fn smoke() {
     let cfg_file = PathBuf::from(s.json(&["list", "--json"])["config"].as_str().unwrap());
     std::fs::create_dir_all(cfg_file.parent().unwrap()).unwrap();
     let path_lit = s.app_path.display().to_string().replace('\'', "");
-    std::fs::write(&cfg_file, format!("schema = 1\n\n[settings]\nonboarded = true\nstaggerSeconds = 0\n\n[settings.appOverrides]\nclaude = '{path_lit}'\n"))
-        .unwrap();
+    let chat_lit = s.chat_path.display().to_string().replace('\'', "");
+    std::fs::write(
+        &cfg_file,
+        format!("schema = 1\n\n[settings]\nonboarded = true\nstaggerSeconds = 0\n\n[settings.appOverrides]\nclaude = '{path_lit}'\nchatgpt = '{chat_lit}'\n"),
+    )
+    .unwrap();
     let list = s.ok(&["list"]);
     assert!(list.lines().next().unwrap().starts_with("Claude") && !list.contains("Claude (not found)"), "Claude not found:\n{list}");
+    assert!(list.contains("ChatGPT") && !list.contains("ChatGPT (not found)"), "ChatGPT not found:\n{list}");
     // Before anything is claimed: who the system sends claude:// to (logged only).
     let _ = s.cmd(&["scheme", "status", "claude"]);
 
@@ -443,14 +500,87 @@ fn smoke() {
     let status = s.json(&["scheme", "status", "claude"]);
     assert_eq!(status["claimed"], false, "still claimed: {status}");
     // The stand-in declares claude:// like the real app, so it gets it back.
+    handed_back(&status, &CLAUDE);
+
+    // ── shortcuts ──
+    let shortcut = shortcut_for(&s, "Smoke Personal", &personal_id);
+    assert!(shortcut.exists(), "no shortcut at {}", shortcut.display());
+
+    // ── ChatGPT: own data folder, CODEX_HOME and CODEX_ELECTRON_USER_DATA_PATH ──
+    s.ok(&["create", "Smoke Chat", "--app", "chatgpt"]);
+    s.ok(&["create", "Smoke Chat Two", "--app", "chatgpt"]);
+    let chat = s.profile("Smoke Chat");
+    let chat_id = chat["id"].as_str().unwrap().to_string();
+    let chat_root = PathBuf::from(chat["dataRoot"].as_str().unwrap());
+    let chat2_id = s.profile("Smoke Chat Two")["id"].as_str().unwrap().to_string();
+    let n = launches_in(&s.chat_dir).len();
+    s.ok(&["login", &chat_id]);
+    let l = wait_launch_in(&s.chat_dir, "Smoke Chat to start", n, |v| udd_of(v).is_some());
+    assert!(same_dir(&udd_of(&l).unwrap(), &chat_root.join("electron")), "wrong data folder: {l}");
+    let euser = l["env"]["CODEX_ELECTRON_USER_DATA_PATH"].as_str().expect("CODEX_ELECTRON_USER_DATA_PATH set");
+    assert!(same_dir(euser, &chat_root.join("electron")), "wrong CODEX_ELECTRON_USER_DATA_PATH: {euser}");
+    let home = l["env"]["CODEX_HOME"].as_str().expect("CODEX_HOME set");
+    assert!(same_dir(home, &chat_root.join("codex-home")), "wrong CODEX_HOME: {home}");
+    s.wait_running("Smoke Chat", true);
+    assert_eq!(s.profile("Smoke Chat Two")["running"], false);
+    assert!(!s.checks().iter().any(|c| c["code"] == "lost-env"), "a correctly started ChatGPT profile was reported as lost");
+
+    // codex:// goes to the ChatGPT profile signing in.
+    let n = launches_in(&s.chat_dir).len();
+    let url = "codex://auth/callback?code=SMOKESECRET3";
+    s.ok(&["open-url", url]);
+    let l = wait_launch_in(&s.chat_dir, "the codex:// link to reach Smoke Chat", n, |v| args_of(v).iter().any(|a| a == url));
+    assert!(same_dir(&udd_of(&l).expect("link went to an isolated profile"), &chat_root.join("electron")));
+    assert!(!s.ok(&["log"]).contains("SMOKESECRET3"), "the sign-in code was written to the log");
+
+    // …also when the system delivers it, and the app gets codex:// back.
+    s.ok(&["scheme", "claim", "chatgpt"]);
+    let status = s.json(&["scheme", "status", "chatgpt"]);
+    assert_eq!(status["claimed"], true, "not claimed: {status}");
+    assert!(!status["handler"].as_str().unwrap_or("").contains(r"\\?\"), "handler uses a \\\\?\\ path: {status}");
+    if s.os_dispatch {
+        s.ok(&["login", &chat_id]);
+        let n = launches_in(&s.chat_dir).len();
+        let url = "codex://auth/callback?code=SMOKESECRET4";
+        if os_open(&s, url) {
+            let l = wait_launch_in(&s.chat_dir, "the OS to deliver the link to Smoke Chat", n, |v| args_of(v).iter().any(|a| a == url));
+            assert!(same_dir(&udd_of(&l).expect("isolated"), &chat_root.join("electron")));
+            eprintln!("✓ the system delivered {url} to Smoke Chat through VibeLauncher");
+        }
+    }
+    s.ok(&["scheme", "release", "chatgpt"]);
+    let status = s.json(&["scheme", "status", "chatgpt"]);
+    assert_eq!(status["claimed"], false, "still claimed: {status}");
+    handed_back(&status, &CHATGPT);
+    s.ok(&["quit", &chat_id]);
+    s.wait_running("Smoke Chat", false);
+
+    // ── clean up ──
+    std::fs::write(s.app_dir.join("fake-app-stop"), "").unwrap();
+    s.wait_running("Smoke Work", false);
+    s.wait_running("Smoke Personal", false);
+    s.ok(&["delete", &work_id, "--delete-data"]);
+    s.ok(&["delete", &personal_id, "--delete-data"]);
+    s.ok(&["delete", &chat_id, "--delete-data"]);
+    s.ok(&["delete", &chat2_id, "--delete-data"]);
+    assert!(!shortcut.exists(), "shortcut left behind at {}", shortcut.display());
+    assert!(!work_root.exists(), "data left behind at {}", work_root.display());
+    assert!(!chat_root.exists(), "data left behind at {}", chat_root.display());
+}
+
+/// After `scheme release`, the app (here the stand-in, which declares the
+/// scheme like the real app) is the handler again. Checked on macOS, where
+/// VibeLauncher has to set it back itself.
+#[allow(unused_variables)]
+fn handed_back(status: &Value, app: &Fake) {
     #[cfg(target_os = "macos")]
-    if status["handler"] != "io.github.gloridust.vlsmoke.claude" {
+    if status["handler"] != fake_bundle_id(app).as_str() {
         let dump = Command::new(LSREGISTER)
             .arg("-dump")
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default();
-        // Whole records (separated by dashed lines) that mention the stand-in.
+        // Whole records (separated by dashed lines) that mention the stand-ins.
         let mut known = Vec::new();
         let mut block = Vec::new();
         for l in dump.lines().chain(std::iter::once("----")) {
@@ -463,21 +593,8 @@ fn smoke() {
                 block.push(l);
             }
         }
-        panic!("the app didn't get its links back: {status}\nLaunch Services knows:\n{}", known.join("\n----\n"));
+        panic!("{} didn't get its links back: {status}\nLaunch Services knows:\n{}", app.name, known.join("\n----\n"));
     }
-
-    // ── shortcuts ──
-    let shortcut = shortcut_for(&s, "Smoke Personal", &personal_id);
-    assert!(shortcut.exists(), "no shortcut at {}", shortcut.display());
-
-    // ── clean up ──
-    std::fs::write(s.app_dir.join("fake-app-stop"), "").unwrap();
-    s.wait_running("Smoke Work", false);
-    s.wait_running("Smoke Personal", false);
-    s.ok(&["delete", &work_id, "--delete-data"]);
-    s.ok(&["delete", &personal_id, "--delete-data"]);
-    assert!(!shortcut.exists(), "shortcut left behind at {}", shortcut.display());
-    assert!(!work_root.exists(), "data left behind at {}", work_root.display());
 }
 
 fn exe_name() -> &'static str {

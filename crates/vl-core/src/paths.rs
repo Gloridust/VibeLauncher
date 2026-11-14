@@ -157,9 +157,9 @@ pub fn gui_exe() -> Option<PathBuf> {
 /// Undo the `\\?\` form `canonicalize` gives on Windows.
 ///
 /// Paths written into the registry, shortcuts and command lines have to be
-/// ordinary ones: the shell refuses to run a link handler written as
-/// `"\\?\C:\…\vibelauncher.exe"` (it shows an error box instead), and many
-/// programs don't understand the prefix. Paths that only work in the long form
+/// ordinary ones: with a link handler written as `"\\?\C:\…\vibelauncher.exe"`,
+/// the shell never ran it and `start <link>` never returned (seen on CI), and
+/// many programs don't understand the prefix. Paths that only work in the long form
 /// (longer than 260 characters) are left as they are.
 pub fn plain(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();

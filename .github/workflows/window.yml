@@ -1,0 +1,52 @@
+name: Window
+
+# Opens the real manager window on macOS and Windows and keeps screenshots,
+# so the window is checked on systems nobody here uses day to day.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: window-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  window:
+    name: Window (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: window
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: Build the command and a stand-in app
+        run: cargo build --release --locked -p vibelauncher --features vibelauncher/smoke-test
+      - name: Build the window
+        working-directory: app
+        run: pnpm tauri build --no-bundle
+      - name: Open the window and take screenshots
+        shell: bash
+        timeout-minutes: 5
+        run: bash .github/scripts/window-check.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-${{ matrix.os }}
+          path: window-shots

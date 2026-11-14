@@ -140,6 +140,7 @@ jobs:
       # app/src-tauri/windows/hooks.nsh, using a stand-in Claude.
       - name: Check the installer (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 20
         shell: bash
         run: |
           cargo build --release --locked -p vibelauncher --features smoke-test --bin vl-fake-app --target ${{ matrix.target }}

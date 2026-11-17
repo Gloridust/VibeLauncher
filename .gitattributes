@@ -1,0 +1,2 @@
+# Signed test data: checked byte for byte, so never convert line endings.
+app/src-tauri/src/update-fixture.* binary

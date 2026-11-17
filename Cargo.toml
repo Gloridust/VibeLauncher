@@ -13,3 +13,7 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "s"
+
+# A one-line fix in softbuffer's Wayland backend; see vendor/README.md.
+[patch.crates-io]
+softbuffer = { path = "vendor/softbuffer" }

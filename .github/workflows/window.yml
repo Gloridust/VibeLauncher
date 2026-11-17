@@ -1,8 +1,8 @@
 name: Window
 
-# Opens the real manager window on macOS and Windows, keeps screenshots, and
-# clicks through it (app/src/selftest.ts), so the window is checked on systems
-# nobody here uses day to day.
+# Opens the real manager window on every system, keeps screenshots, and clicks
+# through it (app/src-tauri/src/selftest.rs), so the window is checked on
+# systems nobody here uses day to day.
 on:
   push:
     branches: [main]
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -28,28 +28,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: window
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install frontend dependencies
-        working-directory: app
-        run: pnpm install --frozen-lockfile
+      - name: Linux dependencies (a screen to open the window on, and to photograph it)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-0 xvfb imagemagick xdg-utils desktop-file-utils libglib2.0-bin
       - name: Build the command and a stand-in app
         run: cargo build --release --locked -p vibelauncher --features vibelauncher/smoke-test
       - name: Build the window, with the click-through test
-        working-directory: app
-        env:
-          VITE_SELFTEST: "1"
-        run: pnpm tauri build --no-bundle --features selftest
+        run: cargo build --release --locked -p vibelauncher-gui --features selftest
       - name: Open the window, take screenshots and click through it
         shell: bash
         timeout-minutes: 10
-        run: bash .github/scripts/window-check.sh
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1280x800x24" bash .github/scripts/window-check.sh
+          else
+            bash .github/scripts/window-check.sh
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

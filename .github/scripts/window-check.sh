@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Opens the real manager window on a CI runner (macOS or Windows) with a few
-# profiles of stand-in apps, checks it stays up, and takes screenshots:
-# English + light, then Chinese + dark. Then it opens the window once more and
-# lets the built-in click-through test (app/src/selftest.ts) create, open,
-# quit, sign in, rename and delete a profile, run Diagnostics and change the
-# settings, and checks what it did with the `vibelauncher` command.
+# Opens the real manager window on a CI runner (Linux under Xvfb, macOS or
+# Windows) with a few profiles of stand-in apps, checks it stays up, and takes
+# screenshots: English + light, then Chinese + dark. Then the built-in
+# click-through test (app/src-tauri/src/selftest.rs, run off-screen with the
+# real window logic) creates, opens, quits, signs in, renames and deletes a
+# profile, runs Diagnostics and changes the settings, and this script checks
+# what it did with the `vibelauncher` command.
 # Everything lives in a temporary VIBELAUNCHER_HOME. Expects release builds of
-# vibelauncher, vibelauncher-gui (with the `selftest` feature and
-# VITE_SELFTEST=1) and vl-fake-app in target/release.
+# vibelauncher, vibelauncher-gui (with the `selftest` feature) and vl-fake-app
+# in target/release.
 #
-# Also runs on Linux for trying it locally (under Xvfb, with private XDG_*
-# folders): RUNNER_TEMP=<folder> bash .github/scripts/window-check.sh
+# To try it locally on Linux, use private XDG_* folders and a scratch HOME:
+# RUNNER_TEMP=<folder> xvfb-run -a bash .github/scripts/window-check.sh
 set -euo pipefail
 
 out="$PWD/window-shots"
@@ -125,15 +126,8 @@ open_and_shoot zh-dark
 sed -i.bak -e 's/^language = "zh"/language = "en"/' -e 's/^theme = "dark"/theme = "light"/' "$cfg"
 report="$out/selftest.txt"
 rm -f "$report"
-VL_SELFTEST_OUT="$(native "$report")" "$gui" > "$out/gui-selftest.log" 2>&1 &
-sleep 5
-check_window selftest
-for _ in $(seq 1 180); do
-  grep -qE '^(end|FAIL)' "$report" 2>/dev/null && break
-  sleep 1
-done
-shot "$out/selftest.png"
-stop_gui
+# Runs off-screen and exits by itself; a screenshot after every step.
+VL_SELFTEST_OUT="$(native "$report")" VL_SHOT="$(native "$out/steps")" "$gui" > "$out/gui-selftest.log" 2>&1 || true
 echo "── click-through test ──"
 cat "$report" || { echo "::error::the click-through test didn't run"; exit 1; }
 fail=0

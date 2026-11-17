@@ -29,7 +29,8 @@ isolated profiles of it, and hands it back when you turn routing off:
 
 Updates: the window checks `latest.json` on the latest GitHub release when it opens (unless
 turned off in Settings). Installing downloads the package of the same kind as the running copy,
-checks its signature against the public key in `tauri.conf.json`, and installs it: the AppImage
+checks its signature against the public key (`app/src-tauri/src/update.rs`, also in
+`tauri.conf.json`), and installs it: the AppImage
 and the `.app` replace themselves, Windows runs the installer in update mode (the hooks keep
 links and shortcuts), and deb/rpm packages are installed with a single `pkexec` prompt. A build
 that isn't a package (`cargo run`) only points to the download page.
@@ -61,27 +62,29 @@ Profile data lives in `~/.local/share/vibelauncher/profiles` (Linux),
 
 ## Building
 
-Requirements: Rust (stable), Node.js 20+ with pnpm, and the
-[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system
-(on Debian/Ubuntu: `libwebkit2gtk-4.1-dev`, `librsvg2-dev`).
+The window is Rust + [Slint](https://slint.dev), drawn with Slint's software renderer: no GPU,
+no WebKit, so graphics drivers can't garble it. Its interface is in `app/src-tauri/ui/*.slint`,
+its logic in `app/src-tauri/src/`. (The folder keeps its old name because the Tauri bundler,
+still used to make the packages, looks for it.)
+
+Requirements: Rust (stable); on Debian/Ubuntu also `libfontconfig1-dev` and `libxkbcommon-dev`.
+Making packages also needs Node.js 20+ with pnpm (for the Tauri bundler and signer only).
 
 ```bash
 cargo build --release -p vibelauncher        # the command (target/release/vibelauncher)
-cd app && pnpm install
-pnpm tauri build                              # the window, plus packages
+cargo build --release -p vibelauncher-gui    # the window
 ```
 
-To ship the command inside the packages, copy it next to the window first and build with the
-bundle config:
+To make packages, put the command next to the window and run the bundler:
 
 ```bash
 cp target/release/vibelauncher app/src-tauri/binaries/vibelauncher-$(rustc -vV | sed -n 's/host: //p')
-cd app && pnpm tauri build --config src-tauri/tauri.bundle.conf.json
+cd app && pnpm install && pnpm tauri bundle --config src-tauri/tauri.bundle.conf.json
 ```
 
-UI work without Tauri: `cd app && pnpm dev`, then open
-`http://localhost:1420/?scenario=busy` (also `fresh`, `noapps`, `route`; add `&lang=zh`,
-`&theme=dark`, `&platform=macos`). A mock backend is used; it isn't part of release builds.
+UI work without a screen: build with `--features selftest` and run
+`VL_SHOT=<folder> target/release/vibelauncher-gui` to save every page and sheet as PNG files, in
+light and dark (it only reads your configuration; set `VIBELAUNCHER_HOME` to use another one).
 
 ## Tests
 
@@ -89,8 +92,9 @@ UI work without Tauri: `cd app && pnpm dev`, then open
 - End to end, against stand-in apps:
   `VL_SMOKE=sandbox cargo test -p vibelauncher --features smoke-test --test smoke`
   (sandbox mode keeps everything in temporary folders).
-- CI runs the end-to-end test on Linux, macOS and Windows, opens the real window on macOS and
-  Windows and clicks through it, and on Windows installs, upgrades and uninstalls the package.
+- CI runs the end-to-end test on Linux, macOS and Windows, opens the real window on all three
+  and clicks through it (`app/src-tauri/src/selftest.rs`, off-screen with the real window
+  logic), and on Windows installs, upgrades and uninstalls the package.
 - What CI can't cover — a real sign-in with the real apps — is the checklist in
   [TESTING.md](TESTING.md) (in Chinese).
 

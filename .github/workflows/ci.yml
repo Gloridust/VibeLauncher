@@ -26,15 +26,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev xdg-utils desktop-file-utils libglib2.0-bin
-      # The window embeds the built frontend; an empty one is enough to compile.
-      - name: Placeholder frontend
-        shell: bash
-        run: mkdir -p app/dist && echo '<!doctype html>' > app/dist/index.html
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev xdg-utils desktop-file-utils libglib2.0-bin
       - name: Test core and command
         run: cargo test -p vl-core -p vibelauncher
-      - name: Check window
-        run: cargo check -p vibelauncher-gui
+      # Unit tests of the window: translations, update feed and signatures.
+      - name: Test window
+        run: cargo test -p vibelauncher-gui
       # Drives the real command on this OS against a stand-in app: launching
       # with an isolated data folder, process detection, the "lost settings"
       # diagnosis and fix, sign-in routing, taking over the claude:// handler
@@ -44,22 +41,3 @@ jobs:
         env:
           VL_SMOKE: ci
         run: cargo test -p vibelauncher --features smoke-test --test smoke -- --nocapture
-
-  frontend:
-    name: Frontend
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        working-directory: app
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build

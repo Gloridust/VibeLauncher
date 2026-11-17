@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/public/logo.svg" width="96" alt="VibeLauncher">
+  <img src="app/src-tauri/ui/logo.svg" width="96" alt="VibeLauncher">
 </p>
 
 <h1 align="center">VibeLauncher</h1>
@@ -14,6 +14,7 @@
   <a href="https://github.com/Gloridust/VibeLauncher/releases/latest"><img src="https://img.shields.io/github/v/release/Gloridust/VibeLauncher" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-555" alt="Platforms">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555" alt="MIT License"></a>
+  <a href="https://slint.dev"><img src="https://img.shields.io/badge/made%20with-Slint-2379F4" alt="Made with Slint"></a>
 </p>
 
 <p align="center">

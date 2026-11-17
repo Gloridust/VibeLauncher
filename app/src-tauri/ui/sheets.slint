@@ -1,0 +1,307 @@
+import { Theme, Tr, Icons } from "theme.slint";
+import { Icon, Btn, Switch, Segmented, Field, Disclosure, Swatches, ProfileIcon, Spinner, Checkbox, Dot, Hint } from "widgets.slint";
+import { App } from "state.slint";
+
+// A modal card over a dimmed window. Escape and a click outside close it.
+export component Sheet inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <length> sheet-width: 460px;
+    callback submit();
+    background: Theme.backdrop;
+    TouchArea { clicked => { App.sheet-close(); } }
+    keys := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { App.sheet-close(); return accept; }
+            if (e.text == Key.Return) { root.submit(); return accept; }
+            reject
+        }
+    }
+    init => { keys.focus(); }
+    card := Rectangle {
+        width: min(root.sheet-width, root.width - 48px);
+        height: min(layout.preferred-height, root.height - 48px);
+        x: (root.width - self.width) / 2;
+        y: max(24px, (root.height - self.height) / 2 - 20px);
+        border-radius: 14px;
+        background: Theme.bg;
+        border-width: Theme.dark ? 1px : 0;
+        border-color: Theme.line;
+        drop-shadow-blur: 40px;
+        drop-shadow-offset-y: 16px;
+        drop-shadow-color: Theme.shadow;
+        clip: true;
+        TouchArea {} // clicks on the card don't close it
+        layout := VerticalLayout {
+            padding: 22px;
+            padding-bottom: 18px;
+            spacing: 14px;
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: root.title; font-size: 16px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
+                if root.subtitle != "": Text { text: root.subtitle; color: Theme.text-2; wrap: word-wrap; }
+            }
+            @children
+        }
+    }
+}
+
+component Label inherits Text {
+    font-weight: 500;
+    color: Theme.text;
+}
+
+component Footer inherits HorizontalLayout {
+
+    cross-axis-alignment: center;
+    padding-top: 6px;
+    spacing: 8px;
+    alignment: end;
+}
+
+component ErrorText inherits Text {
+    color: Theme.red;
+    font-size: 12.5px;
+    wrap: word-wrap;
+}
+
+export component ProfileSheet inherits Sheet {
+    title: App.ps-editing ? Tr.t(Tr.lang, "sheet.editTitle") : Tr.t(Tr.lang, "sheet.newTitle");
+    sheet-width: 500px;
+    submit => { App.ps-save(); }
+    VerticalLayout {
+        spacing: 6px;
+        Label { text: Tr.t(Tr.lang, "sheet.name"); }
+        name := Field {
+            text <=> App.ps-name;
+            placeholder: Tr.t(Tr.lang, "sheet.namePlaceholder");
+            edited(t) => { App.ps-name-edited(t); }
+            accepted => { App.ps-save(); }
+            init => { self.focus-input(); }
+        }
+    }
+    VerticalLayout {
+        spacing: 6px;
+        Label { text: Tr.t(Tr.lang, "sheet.app"); }
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            alignment: start;
+            Segmented { options: App.ps-providers; value: App.ps-provider; chosen(v) => { App.ps-choose-provider(v); } }
+        }
+    }
+    VerticalLayout {
+        spacing: 8px;
+        Label { text: Tr.t(Tr.lang, "sheet.color"); }
+        Swatches { colors: App.ps-colors; value: App.ps-color; chosen(c) => { App.ps-choose-color(c); } }
+    }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        spacing: 12px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 1px;
+            Label { text: Tr.t(Tr.lang, "sheet.shortcut"); }
+            Hint { text: App.ps-shortcut-hint; }
+        }
+        Switch { on: App.ps-shortcut; toggled(v) => { App.ps-shortcut = v; } }
+    }
+    if App.ps-is-default: Hint { text: Tr.t(Tr.lang, "sheet.defaultNote"); }
+    if !App.ps-is-default: VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            alignment: start;
+            Disclosure { text: Tr.t(Tr.lang, "sheet.advanced"); open: App.ps-advanced; toggled => { App.ps-advanced = !App.ps-advanced; } }
+        }
+        if App.ps-advanced: VerticalLayout {
+            spacing: 6px;
+            Label { text: Tr.t(Tr.lang, "sheet.dataFolder"); }
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                spacing: 8px;
+                Field { text <=> App.ps-data-root; mono: true; placeholder: App.ps-default-path; horizontal-stretch: 1; }
+                Btn { text: Tr.t(Tr.lang, "action.choose"); clicked => { App.ps-pick-folder(); } }
+            }
+            if App.ps-data-root == "": Hint { text: Tr.t1(Tr.lang, "sheet.dataDefault", "path", App.ps-default-path); }
+        }
+        if App.ps-advanced: VerticalLayout {
+            spacing: 6px;
+            Label { text: Tr.t(Tr.lang, "sheet.env"); }
+            Field { text <=> App.ps-env; mono: true; multiline: true; rows: 3; placeholder: "HTTPS_PROXY=http://127.0.0.1:7890"; }
+            Hint { text: Tr.t(Tr.lang, "sheet.envHint"); }
+        }
+        if App.ps-advanced: VerticalLayout {
+            spacing: 6px;
+            Label { text: Tr.t(Tr.lang, "sheet.args"); }
+            Field { text <=> App.ps-args; mono: true; multiline: true; rows: 2; placeholder: "--lang=en-US"; }
+            Hint { text: Tr.t(Tr.lang, "sheet.argsHint"); }
+        }
+    }
+    if App.ps-error != "": ErrorText { text: App.ps-error; }
+    Footer {
+        Btn { text: Tr.t(Tr.lang, "action.cancel"); clicked => { App.sheet-close(); } }
+        Btn {
+            kind: "primary";
+            text: App.ps-editing ? Tr.t(Tr.lang, "action.save") : Tr.t(Tr.lang, "action.create");
+            busy: App.ps-saving;
+            enabled: App.ps-name != "";
+            clicked => { App.ps-save(); }
+        }
+    }
+}
+
+export component DeleteSheet inherits Sheet {
+    title: App.del-title;
+    subtitle: App.del-sub;
+    submit => { App.del-confirm-clicked(); }
+    HorizontalLayout {
+        cross-axis-alignment: start;
+        spacing: 10px;
+        Checkbox { checked: App.del-with-data; toggled(v) => { App.del-with-data = v; } }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Label { text: Tr.t(Tr.lang, "delete.data"); }
+            Hint { text: App.del-hint; }
+            TouchArea { clicked => { App.del-with-data = !App.del-with-data; } }
+        }
+    }
+    if App.del-error != "": ErrorText { text: App.del-error; }
+    Footer {
+        Btn { text: Tr.t(Tr.lang, "action.cancel"); clicked => { App.sheet-close(); } }
+        Btn { kind: "danger"; text: App.del-confirm; busy: App.del-busy; clicked => { App.del-confirm-clicked(); } }
+    }
+}
+
+export component LoginSheet inherits Sheet {
+    title: App.login-title;
+    sheet-width: 500px;
+    submit => { if (App.login-link != "") { App.login-send(); } }
+    VerticalLayout {
+        spacing: 10px;
+        for s[i] in App.login-steps: HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: Theme.selected;
+                Text { text: i + 1; font-size: 11px; font-weight: 600; color: Theme.text-2; }
+            }
+            Text { text: s; color: Theme.text; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+        }
+    }
+    Rectangle {
+        height: 46px;
+        border-radius: 10px;
+        background: App.login-phase == "done" ? #2f9e621f : Theme.subtle;
+        border-width: 1px;
+        border-color: Theme.line;
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            padding-left: 14px;
+            spacing: 10px;
+            if App.login-phase == "done": Icon { source: Icons.circle-check; size: 20px; colorize: Theme.green; }
+            if App.login-phase == "expired": Icon { source: Icons.triangle-alert; size: 18px; colorize: Theme.amber; }
+            if App.login-phase == "starting" || App.login-phase == "error": Spinner { size: 18px; }
+            if App.login-phase == "waiting": Rectangle {
+                width: 22px;
+                height: 22px;
+                Rectangle { border-radius: 11px; border-width: 2.5px; border-color: Theme.selected; }
+                Path {
+                    width: 22px;
+                    height: 22px;
+                    viewbox-width: 22;
+                    viewbox-height: 22;
+                    stroke: Theme.accent;
+                    stroke-width: 2.5px;
+                    MoveTo { x: 11; y: 1.75; }
+                    ArcTo {
+                        x: 11 + 9.25 * sin(App.login-left * 359.9deg);
+                        y: 11 - 9.25 * cos(App.login-left * 359.9deg);
+                        radius-x: 9.25;
+                        radius-y: 9.25;
+                        large-arc: App.login-left > 0.5;
+                        sweep: true;
+                    }
+                }
+            }
+            Text {
+                text: App.login-phase == "done" ? Tr.t(Tr.lang, "login.received") : App.login-phase == "expired" ? Tr.t(Tr.lang, "login.expired") : App.login-phase == "waiting" ? App.login-wait : Tr.t(Tr.lang, "action.open") + "…";
+                color: App.login-phase == "expired" ? Theme.text-2 : Theme.text;
+                font-weight: App.login-phase == "done" ? 500 : 400;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+    if App.login-routing-hint != "" && App.login-phase != "done": Hint { text: App.login-routing-hint; }
+    if App.login-phase != "done": VerticalLayout {
+        spacing: 6px;
+        Label { text: Tr.t(Tr.lang, "login.pasteTitle"); }
+        Hint { text: App.login-paste-body; }
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            spacing: 8px;
+            padding-top: 2px;
+            Field { text <=> App.login-link; mono: true; placeholder: App.login-placeholder; horizontal-stretch: 1; accepted => { if (App.login-link != "") { App.login-send(); } } }
+            if App.login-link == "": Btn { icon: Icons.clipboard; has-icon: true; text: ""; clicked => { App.login-paste(); } }
+            if App.login-link != "": Btn { kind: "primary"; text: Tr.t(Tr.lang, "login.pasteOpen"); busy: App.login-sending; clicked => { App.login-send(); } }
+        }
+    }
+    if App.login-error != "": ErrorText { text: App.login-error; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-top: 6px;
+        spacing: 8px;
+        if App.login-phase == "waiting": Btn { kind: "ghost"; text: Tr.t(Tr.lang, "action.cancel"); clicked => { App.cancel-login(); } }
+        if App.login-phase == "expired" || App.login-phase == "error": Btn { text: Tr.t(Tr.lang, "login.again"); clicked => { App.login-again(); } }
+        Rectangle { horizontal-stretch: 1; }
+        Btn {
+            kind: App.login-phase == "done" ? "primary" : "";
+            text: App.login-phase == "done" ? Tr.t(Tr.lang, "action.done") : Tr.t(Tr.lang, "action.close");
+            clicked => { App.sheet-close(); }
+        }
+    }
+}
+
+export component RouteSheet inherits Sheet {
+    title: App.route-title;
+    subtitle: App.route-sub;
+    VerticalLayout {
+        spacing: 8px;
+        for c in App.route-choices: Rectangle {
+            height: 56px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            background: ta.has-hover ? Theme.hover : Theme.card;
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                ProfileIcon { icon: c.icon; color: c.color; size: 32px; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: c.name; font-weight: 500; color: Theme.text; }
+                    HorizontalLayout {
+                        cross-axis-alignment: center;
+                        alignment: start;
+                        spacing: 6px;
+                        if c.running: Dot { }
+                        Text { text: c.sub; font-size: 12px; color: Theme.text-2; }
+                    }
+                }
+                if App.route-busy == c.id: Spinner { }
+                if App.route-busy != c.id: Icon { source: Icons.chevron-right; size: 16px; colorize: Theme.text-3; }
+            }
+            ta := TouchArea { enabled: App.route-busy == ""; clicked => { App.route-pick(c.id); } }
+        }
+    }
+    if App.route-error != "": ErrorText { text: App.route-error; }
+    Footer { Btn { text: Tr.t(Tr.lang, "action.cancel"); clicked => { App.sheet-close(); } } }
+}

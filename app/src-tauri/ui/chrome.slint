@@ -1,0 +1,65 @@
+// The window's own title bar parts: a drag area and, outside macOS (which
+// keeps its traffic lights), minimise / maximise / close in the app's colours.
+
+import { Theme, Icons } from "theme.slint";
+import { Icon } from "widgets.slint";
+import { App } from "state.slint";
+
+// Drag the window from here; double-click maximises.
+export component DragArea inherits TouchArea {
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+            App.win-drag();
+        }
+    }
+    double-clicked => { App.win-maximize(); }
+}
+
+component WinBtn {
+    in property <string> kind; // "min" | "max" | "close"
+    callback clicked();
+    width: 34px;
+    height: 28px;
+    Rectangle {
+        border-radius: 7px;
+        background: ta.has-hover ? (kind == "close" ? Theme.red : Theme.hover) : transparent;
+    }
+    property <color> fg: ta.has-hover && kind == "close" ? #ffffff : Theme.text-2;
+    if kind == "min": Rectangle { width: 10px; height: 1.2px; background: fg; }
+    if kind == "max" && !App.maximized: Rectangle { width: 9px; height: 9px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; }
+    if kind == "max" && App.maximized: Rectangle {
+        Rectangle { x: (parent.width - 9px) / 2 + 2px; y: (parent.height - 9px) / 2 - 2px; width: 8px; height: 8px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; }
+        Rectangle { x: (parent.width - 9px) / 2 - 1px; y: (parent.height - 9px) / 2 + 1px; width: 8px; height: 8px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; background: Theme.bg; }
+    }
+    if kind == "close": Icon { source: Icons.x; size: 15px; colorize: fg; }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component WindowButtons inherits HorizontalLayout {
+
+    cross-axis-alignment: center;
+    spacing: 2px;
+    WinBtn { kind: "min"; clicked => { App.win-minimize(); } }
+    WinBtn { kind: "max"; clicked => { App.win-maximize(); } }
+    WinBtn { kind: "close"; clicked => { App.win-close(); } }
+}
+
+component Edge inherits TouchArea {
+    in property <int> dir;
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { App.win-resize(dir); }
+    }
+}
+
+// Thin edges that resize a frameless window.
+export component ResizeEdges {
+    in property <length> grip: 5px;
+    Edge { dir: 0; x: grip; y: 0; width: parent.width - 2 * grip; height: grip; mouse-cursor: ns-resize; }
+    Edge { dir: 4; x: grip; y: parent.height - grip; width: parent.width - 2 * grip; height: grip; mouse-cursor: ns-resize; }
+    Edge { dir: 6; x: 0; y: grip; width: grip; height: parent.height - 2 * grip; mouse-cursor: ew-resize; }
+    Edge { dir: 2; x: parent.width - grip; y: grip; width: grip; height: parent.height - 2 * grip; mouse-cursor: ew-resize; }
+    Edge { dir: 7; x: 0; y: 0; width: grip * 2; height: grip * 2; mouse-cursor: nwse-resize; }
+    Edge { dir: 3; x: parent.width - grip * 2; y: parent.height - grip * 2; width: grip * 2; height: grip * 2; mouse-cursor: nwse-resize; }
+    Edge { dir: 1; x: parent.width - grip * 2; y: 0; width: grip * 2; height: grip * 2; mouse-cursor: nesw-resize; }
+    Edge { dir: 5; x: 0; y: parent.height - grip * 2; width: grip * 2; height: grip * 2; mouse-cursor: nesw-resize; }
+}

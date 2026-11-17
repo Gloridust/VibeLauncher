@@ -1,0 +1,125 @@
+import { Theme, Tr, Icons } from "theme.slint";
+import { Icon, Dot, ProfileIcon } from "widgets.slint";
+import { App } from "state.slint";
+import { DragArea } from "chrome.slint";
+
+component NavItem {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> active;
+    in property <string> count;
+    in property <color> count-bg: Theme.amber;
+    in property <string> trailing;
+    callback clicked();
+    height: 32px;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { clicked(); }
+    Rectangle { border-radius: 8px; background: active ? Theme.selected : ta.has-hover ? Theme.hover : transparent; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+        Icon { source: icon; size: 16px; }
+        Text { text: label; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        if count != "": Rectangle {
+            height: 18px;
+            width: max(18px, t.preferred-width + 10px);
+            border-radius: 9px;
+            background: count-bg;
+            t := Text { text: count; color: #ffffff; font-size: 11px; font-weight: 600; }
+        }
+        if trailing != "": Text { text: trailing; color: Theme.text-3; font-size: 11px; vertical-alignment: center; }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component Sidebar inherits Rectangle {
+    width: 248px;
+    background: Theme.sidebar;
+    Rectangle { x: parent.width - 1px; width: 1px; background: Theme.sidebar-border; }
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-bottom: 10px;
+        Rectangle {
+            height: Theme.mac ? 80px : 52px;
+            DragArea {}
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 8px;
+                padding-top: Theme.mac ? 30px : 0;
+                spacing: 8px;
+                alignment: start;
+                Image { source: Icons.logo; width: 20px; height: 20px; }
+                Text { text: "VibeLauncher"; font-size: 14px; font-weight: 600; color: Theme.text; vertical-alignment: center; }
+            }
+        }
+        NavItem {
+            icon: Icons.plus;
+            label: Tr.t(Tr.lang, "nav.new");
+            clicked => { App.new-profile(""); }
+        }
+        NavItem {
+            icon: Icons.stethoscope;
+            label: Tr.t(Tr.lang, "nav.diagnostics");
+            active: App.page == "diagnostics";
+            count: App.issues > 0 ? "\{App.issues}" : "";
+            count-bg: App.issues-red ? Theme.red : Theme.amber;
+            clicked => { App.select("diagnostics", ""); }
+        }
+        Flickable {
+            vertical-stretch: 1;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                alignment: start;
+                for r in App.side-rows: Rectangle {
+                    height: r.header ? 40px : 34px;
+                    if r.header: Rectangle {
+                        y: 14px;
+                        height: 24px;
+                        Rectangle { border-radius: 6px; background: hta.has-hover ? Theme.hover : transparent; }
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 4px;
+                            Text { text: r.label; color: Theme.text-3; font-size: 12px; font-weight: 500; vertical-alignment: center; }
+                            Icon { source: Icons.chevron-down; size: 12px; colorize: Theme.text-3; opacity: hta.has-hover || r.collapsed ? 1 : 0; transform-rotation: r.collapsed ? -90deg : 0deg; }
+                            Rectangle { horizontal-stretch: 1; }
+                            if r.note != "": Text { text: r.note; color: Theme.text-3; font-size: 11px; vertical-alignment: center; }
+                        }
+                        hta := TouchArea { clicked => { App.toggle-section(r.provider); } }
+                    }
+                    if !r.header: Rectangle {
+                        Rectangle { border-radius: 8px; background: App.page == "profile" && App.profile.id == r.id ? Theme.selected : pta.has-hover ? Theme.hover : transparent; }
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 10px;
+                            ProfileIcon { icon: r.icon; color: r.color; size: 20px; }
+                            Text { text: r.label; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            if r.pending: Icon { source: Icons.key-round; size: 14px; colorize: Theme.text-3; }
+                            if r.running: Dot { amber: r.lost; }
+                        }
+                        pta := TouchArea {
+                            clicked => { App.select("profile", r.id); }
+                            double-clicked => { App.launch(r.id); }
+                        }
+                    }
+                }
+            }
+        }
+        NavItem {
+            icon: Icons.settings;
+            label: Tr.t(Tr.lang, "nav.settings");
+            active: App.page == "settings";
+            count: App.update-badge ? Tr.t(Tr.lang, "update.badge") : "";
+            count-bg: Theme.accent;
+            trailing: App.update-badge ? "" : App.version;
+            clicked => { App.select("settings", ""); }
+        }
+    }
+}

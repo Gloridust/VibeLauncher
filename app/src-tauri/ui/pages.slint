@@ -1,0 +1,658 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Tr, Icons } from "theme.slint";
+import { Icon, Btn, Switch, Segmented, Card, Row, SectionTitle, Hint, Dot, Pill, Banner, Disclosure, ProfileIcon, Spinner } from "widgets.slint";
+import { App, AppRow } from "state.slint";
+
+// The scrolling page body: a centred column at most 680px wide.
+export component Page inherits ScrollView {
+    in property <length> column-width: 680px;
+    content-width: self.visible-width;
+    content-height: col.preferred-height + 56px;
+    col := VerticalLayout {
+        x: max(32px, (root.visible-width - root.column-width) / 2);
+        y: 8px;
+        width: min(root.column-width, root.visible-width - 64px);
+        alignment: start;
+        spacing: 0;
+        @children
+    }
+}
+
+component Gap inherits Rectangle { in property <length> h: 16px; height: h; }
+
+component TitleSub inherits VerticalLayout {
+    in property <string> title;
+    in property <string> sub;
+    in property <bool> sub-warn;
+    in property <bool> mono;
+    horizontal-stretch: 1;
+    alignment: center;
+    spacing: 1px;
+    if title != "": Text { text: title; font-weight: 500; color: Theme.text; wrap: word-wrap; }
+    if sub != "": Text {
+        text: sub;
+        font-size: mono ? 11.5px : 12px;
+        font-family: mono ? Theme.mono : "";
+        color: sub-warn ? Theme.amber : Theme.text-2;
+        wrap: word-wrap;
+    }
+}
+
+component RowLayout inherits HorizontalLayout {
+
+    cross-axis-alignment: center;
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    spacing: 12px;
+}
+
+component ValueRow inherits Row {
+    in property <bool> is-first;
+    in property <string> label;
+    in property <string> value;
+    first: is-first;
+    RowLayout {
+        Text { text: label; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: value; color: Theme.text-2; vertical-alignment: center; horizontal-alignment: right; overflow: elide; }
+    }
+}
+
+component ShortcutRow inherits Row {
+    RowLayout {
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+            Text { text: Tr.t(Tr.lang, "detail.shortcut"); font-weight: 500; color: Theme.text; }
+            if !App.profile.shortcut-broken: Text { text: App.profile.shortcut-hint; font-size: 12px; color: Theme.text-2; wrap: word-wrap; }
+            if App.profile.shortcut-broken: HorizontalLayout {
+                alignment: start;
+                spacing: 4px;
+                Text { text: Tr.t(Tr.lang, "detail.shortcutBroken"); font-size: 12px; color: Theme.amber; }
+                Text {
+                    text: Tr.t(Tr.lang, "detail.repair");
+                    font-size: 12px;
+                    color: Theme.accent;
+                    TouchArea { mouse-cursor: pointer; clicked => { App.repair-shortcuts(); } }
+                }
+            }
+        }
+        Switch {
+            on: App.profile.shortcut;
+            label: Tr.t(Tr.lang, "detail.shortcut");
+            toggled(v) => { App.set-shortcut(App.profile.id, v); }
+        }
+    }
+}
+
+export component ProfilePage inherits Page {
+    // hero
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-top: 4px;
+        spacing: 16px;
+        ProfileIcon { icon: App.profile.icon; color: App.profile.color; size: 64px; }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            Text { text: App.profile.name; font-size: 22px; font-weight: 600; color: Theme.text; overflow: elide; }
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                alignment: start;
+                spacing: 8px;
+                Text {
+                    text: App.profile.app-name + " · " + (App.profile.isolated ? Tr.t(Tr.lang, "status.separate") : Tr.t(Tr.lang, "status.default"));
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                }
+                if App.profile.running: Pill {
+                    kind: App.profile.lost ? "amber" : "green";
+                    dot: true;
+                    text: App.profile.lost ? Tr.t(Tr.lang, "status.lost") : Tr.t(Tr.lang, "status.running");
+                }
+                if !App.profile.running && App.profile.pending: Pill { kind: "amber"; key: true; text: Tr.t(Tr.lang, "status.signingIn"); }
+                if !App.profile.running && !App.profile.pending: Pill { text: Tr.t(Tr.lang, "status.stopped"); }
+            }
+        }
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            spacing: 8px;
+            alignment: center;
+            if App.profile.running: Btn {
+                text: Tr.t(Tr.lang, "action.quit");
+                icon: Icons.power; has-icon: true;
+                enabled: App.busy == "";
+                busy: App.busy == "quit";
+                clicked => { App.quit(App.profile.id); }
+            }
+            if App.profile.isolated: Btn {
+                text: Tr.t(Tr.lang, "action.signIn");
+                icon: Icons.key-round; has-icon: true;
+                kind: App.profile.first-run ? "primary" : "";
+                enabled: App.profile.app-installed && App.busy == "";
+                clicked => { App.sign-in(App.profile.id); }
+            }
+            Btn {
+                text: App.profile.running ? Tr.t(Tr.lang, "action.focus") : Tr.t(Tr.lang, "action.open");
+                icon: Icons.play; has-icon: true;
+                kind: App.profile.first-run ? "" : "primary";
+                enabled: App.profile.app-installed && App.busy == "";
+                busy: App.busy == "open";
+                clicked => { App.launch(App.profile.id); }
+            }
+        }
+    }
+
+    if !App.profile.app-installed: VerticalLayout {
+        Gap {}
+        Banner {
+            kind: "amber";
+            icon: Icons.package-x;
+            title: Tr.t1(Tr.lang, "detail.notInstalled", "app", App.profile.app-name);
+            body: Tr.t(Tr.lang, "detail.notInstalledBody");
+            Btn { size: "sm"; text: Tr.t(Tr.lang, "detail.openSettings"); clicked => { App.select("settings", ""); } }
+        }
+    }
+    if App.profile.lost: VerticalLayout {
+        Gap {}
+        Banner {
+            kind: "amber";
+            icon: Icons.triangle-alert;
+            title: Tr.t1(Tr.lang, "detail.lostTitle", "name", App.profile.name);
+            body: Tr.t(Tr.lang, "detail.lostBody");
+            Btn {
+                size: "sm"; kind: "primary";
+                text: Tr.t(Tr.lang, "action.restart");
+                icon: Icons.rotate; has-icon: true;
+                enabled: App.busy == "";
+                clicked => { App.restart(App.profile.id); }
+            }
+        }
+    }
+    if App.profile.pending: VerticalLayout {
+        Gap {}
+        Banner {
+            kind: "accent";
+            icon: Icons.key-round;
+            title: Tr.t(Tr.lang, "detail.pendingTitle");
+            body: Tr.t1(Tr.lang, "detail.pendingBody", "app", App.profile.app-name);
+            Btn { size: "sm"; text: Tr.t(Tr.lang, "detail.pasteLink"); clicked => { App.sign-in(App.profile.id); } }
+            Btn { size: "sm"; kind: "ghost"; text: Tr.t(Tr.lang, "action.cancel"); clicked => { App.cancel-login(); } }
+        }
+    }
+
+    Gap { h: 28px; }
+    SectionTitle { text: Tr.t(Tr.lang, "detail.profile"); }
+    Gap { h: 8px; }
+    if !App.profile.isolated: Card {
+        VerticalLayout {
+            Row {
+                first: true;
+                RowLayout {
+                    Icon { source: Icons.shield-check; size: 18px; colorize: Theme.text-3; }
+                    TitleSub {
+                        title: Tr.t1(Tr.lang, "detail.defaultTitle", "app", App.profile.app-name);
+                        sub: Tr.t(Tr.lang, "detail.defaultBody");
+                    }
+                }
+            }
+            ShortcutRow {}
+            ValueRow { label: Tr.t(Tr.lang, "detail.lastOpened"); value: App.profile.last-opened; }
+        }
+    }
+    if App.profile.isolated: Card {
+        VerticalLayout {
+            Row {
+                first: true;
+                RowLayout {
+                    TitleSub { title: Tr.t(Tr.lang, "detail.dataFolder"); sub: App.profile.data-dir; mono: true; }
+                    Btn { size: "sm"; text: Tr.t(Tr.lang, "action.show"); clicked => { App.show-data(App.profile.id); } }
+                }
+            }
+            ValueRow { label: Tr.t(Tr.lang, "detail.size"); value: App.profile.size; }
+            ShortcutRow {}
+            ValueRow { label: Tr.t(Tr.lang, "detail.lastOpened"); value: App.profile.last-opened; }
+        }
+    }
+    if App.profile.isolated: VerticalLayout {
+        Gap { h: 24px; }
+        Disclosure {
+            text: Tr.t(Tr.lang, "detail.advanced");
+            open: App.detail-advanced;
+            toggled => { App.detail-advanced = !App.detail-advanced; }
+        }
+        Gap { h: 8px; }
+        if App.detail-advanced: Card {
+            VerticalLayout {
+                Row {
+                    first: true;
+                    RowLayout { TitleSub { title: Tr.t(Tr.lang, "detail.isolation"); sub: Tr.t(Tr.lang, "detail.isolationBody"); } }
+                }
+                Row {
+                    RowLayout {
+                        TitleSub {
+                            title: Tr.t(Tr.lang, "detail.env");
+                            sub: App.profile.env-text == "" ? Tr.t(Tr.lang, "detail.none") : App.profile.env-text;
+                            mono: App.profile.env-text != "";
+                        }
+                    }
+                }
+                Row {
+                    RowLayout {
+                        TitleSub {
+                            title: Tr.t(Tr.lang, "detail.args");
+                            sub: App.profile.args-text == "" ? Tr.t(Tr.lang, "detail.none") : App.profile.args-text;
+                            mono: App.profile.args-text != "";
+                        }
+                        Btn { size: "sm"; text: Tr.t(Tr.lang, "action.edit"); clicked => { App.edit(App.profile.id); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component LevelIcon inherits Icon {
+    in property <string> level;
+    size: 18px;
+    source: level == "error" ? Icons.circle-alert : level == "warning" ? Icons.triangle-alert : level == "info" ? Icons.info : Icons.circle-check;
+    colorize: level == "error" ? Theme.red : level == "warning" ? Theme.amber : level == "info" ? Theme.blue : Theme.green;
+}
+
+export component DiagnosticsPage inherits Page {
+    Text { text: Tr.t(Tr.lang, "diag.subtitle"); font-size: 12.5px; color: Theme.text-2; wrap: word-wrap; }
+    Gap {}
+    Card {
+        HorizontalLayout {
+            cross-axis-alignment: center;
+            padding: 16px;
+            spacing: 12px;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 16px;
+                background: App.summary-level == "err" ? Theme.red-soft : App.summary-level == "warn" ? Theme.amber-soft : #2f9e621f;
+                if !App.checks-loaded: Spinner { size: 18px; colorize: Theme.green; }
+                if App.checks-loaded: Icon {
+                    size: 18px;
+                    source: App.summary-level == "err" ? Icons.circle-alert : App.summary-level == "warn" ? Icons.triangle-alert : Icons.check;
+                    colorize: App.summary-level == "err" ? Theme.red : App.summary-level == "warn" ? Theme.amber : Theme.green;
+                }
+            }
+            Text { text: App.summary; font-size: 15px; font-weight: 600; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+    }
+    if App.checks-loaded && App.checks.length > 0: VerticalLayout {
+        Gap {}
+        Card {
+            VerticalLayout {
+                for c[i] in App.checks: Row {
+                    first: i == 0;
+                    RowLayout {
+                        LevelIcon { level: c.level; }
+                        TitleSub { title: c.title; sub: c.detail; }
+                        if c.has-fix: Btn {
+                            size: "sm";
+                            kind: c.level == "error" ? "primary" : "";
+                            text: App.fixing == c.id ? Tr.t(Tr.lang, "diag.fixing") : c.fix-label;
+                            icon: Icons.wrench; has-icon: true;
+                            busy: App.fixing == c.id;
+                            enabled: App.fixing == "";
+                            clicked => { App.fix(c.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Gap { h: 28px; }
+    SectionTitle { text: Tr.t(Tr.lang, "diag.log"); }
+    Gap { h: 6px; }
+    Text { text: Tr.t(Tr.lang, "diag.logHint"); font-size: 12.5px; color: Theme.text-2; wrap: word-wrap; }
+    Gap { h: 10px; }
+    Card {
+        VerticalLayout {
+            padding: 14px;
+            if App.log-state == 0: Text { text: "…"; color: Theme.text-3; }
+            if App.log-state == 1: Text { text: Tr.t(Tr.lang, "diag.logEmpty"); color: Theme.text-3; }
+            if App.log-state == 2: Text {
+                text: App.log-text;
+                font-family: Theme.mono;
+                font-size: 11.5px;
+                color: Theme.text-2;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+component AppIcon {
+    in property <image> icon;
+    width: 32px;
+    height: 32px;
+    if icon.width > 0: Image { source: icon; width: 32px; height: 32px; }
+    if icon.width == 0: Rectangle {
+        border-radius: 8px;
+        background: Theme.selected;
+        Icon { source: Icons.package; size: 18px; }
+    }
+}
+
+component IconBtnSmall {
+    in property <image> icon;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 28px;
+    height: 28px;
+    Rectangle { border-radius: 7px; background: ta.has-hover && enabled ? Theme.hover : transparent; }
+    Icon { source: icon; size: 15px; opacity: enabled ? 1 : 0.35; }
+    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+export component SettingsPage inherits Page {
+    SectionTitle { text: Tr.t(Tr.lang, "settings.general"); }
+    Gap { h: 8px; }
+    Card {
+        VerticalLayout {
+            Row {
+                first: true;
+                RowLayout {
+                    Text { text: Tr.t(Tr.lang, "settings.language"); color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Segmented {
+                        value: App.language;
+                        options: [
+                            { value: "auto", label: Tr.t(Tr.lang, "settings.auto") },
+                            { value: "en", label: "English" },
+                            { value: "zh", label: "简体中文" },
+                        ];
+                        chosen(v) => { App.set-language(v); }
+                    }
+                }
+            }
+            Row {
+                RowLayout {
+                    Text { text: Tr.t(Tr.lang, "settings.theme"); color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Segmented {
+                        value: App.theme;
+                        options: [
+                            { value: "auto", label: Tr.t(Tr.lang, "settings.auto") },
+                            { value: "light", label: Tr.t(Tr.lang, "settings.light") },
+                            { value: "dark", label: Tr.t(Tr.lang, "settings.dark") },
+                        ];
+                        chosen(v) => { App.set-theme(v); }
+                    }
+                }
+            }
+        }
+    }
+
+    Gap { h: 20px; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        SectionTitle { text: Tr.t(Tr.lang, "settings.apps"); vertical-alignment: center; horizontal-stretch: 1; }
+        Btn {
+            size: "sm"; kind: "ghost";
+            text: Tr.t(Tr.lang, "action.findAgain");
+            icon: Icons.refresh; has-icon: true;
+            busy: App.apps-busy == "refresh";
+            clicked => { App.find-apps(); }
+        }
+    }
+    Gap { h: 6px; }
+    Card {
+        VerticalLayout {
+            for a[i] in App.apps: Row {
+                first: i == 0;
+                RowLayout {
+                    AppIcon { icon: a.icon; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 1px;
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            alignment: start;
+                            spacing: 6px;
+                            Text { text: a.name; font-weight: 500; color: Theme.text; vertical-alignment: center; }
+                            if a.version != "": Text { text: a.version; color: Theme.text-3; vertical-alignment: center; }
+                            if a.manual: Pill { text: Tr.t(Tr.lang, "settings.manual"); }
+                        }
+                        if a.installed: Text { text: a.path; font-family: Theme.mono; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                        if !a.installed: Text { text: Tr.t(Tr.lang, "settings.appMissing"); font-size: 12px; color: Theme.amber; wrap: word-wrap; }
+                    }
+                    if a.manual: Btn {
+                        size: "sm"; kind: "ghost";
+                        text: Tr.t(Tr.lang, "action.reset");
+                        enabled: App.apps-busy != a.provider;
+                        clicked => { App.reset-app(a.provider); }
+                    }
+                    Btn {
+                        size: "sm";
+                        text: a.installed ? Tr.t(Tr.lang, "action.change") : Tr.t(Tr.lang, "action.choose");
+                        busy: App.apps-busy == a.provider;
+                        clicked => { App.choose-app(a.provider); }
+                    }
+                }
+            }
+        }
+    }
+
+    Gap { h: 28px; }
+    SectionTitle { text: Tr.t(Tr.lang, "settings.links"); }
+    Gap { h: 6px; }
+    Text { text: Tr.t(Tr.lang, "settings.linksBody"); font-size: 12.5px; color: Theme.text-2; wrap: word-wrap; }
+    Gap { h: 10px; }
+    Card {
+        VerticalLayout {
+            for a[i] in App.apps: Row {
+                first: i == 0;
+                RowLayout {
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 1px;
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            alignment: start;
+                            spacing: 8px;
+                            Text { text: a.route-title; font-weight: 500; color: Theme.text; vertical-alignment: center; }
+                            if a.route-experimental: Pill { text: Tr.t(Tr.lang, "settings.experimental"); }
+                        }
+                        Text { text: a.route-status; font-size: 12px; color: a.route-warn ? Theme.amber : Theme.text-2; wrap: word-wrap; }
+                    }
+                    Switch {
+                        on: a.route-on;
+                        enabled: a.route-supported;
+                        label: a.route-title;
+                        toggled(v) => { App.set-route(a.provider, v); }
+                    }
+                }
+            }
+        }
+    }
+
+    Gap { h: 28px; }
+    SectionTitle { text: Tr.t(Tr.lang, "settings.restarts"); }
+    Gap { h: 8px; }
+    Card {
+        Row {
+            first: true;
+            RowLayout {
+                TitleSub { title: Tr.t(Tr.lang, "settings.stagger"); sub: Tr.t(Tr.lang, "settings.staggerHint"); }
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    spacing: 4px;
+                    alignment: center;
+                    IconBtnSmall { icon: Icons.minus; enabled: App.stagger > 0; clicked => { App.set-stagger(max(0, App.stagger - 1)); } }
+                    Text { min-width: 64px; text: Tr.t1(Tr.lang, "settings.seconds", "n", App.stagger); color: Theme.text; horizontal-alignment: center; vertical-alignment: center; }
+                    IconBtnSmall { icon: Icons.plus; enabled: App.stagger < 30; clicked => { App.set-stagger(min(30, App.stagger + 1)); } }
+                }
+            }
+        }
+    }
+
+    Gap { h: 28px; }
+    SectionTitle { text: Tr.t(Tr.lang, "settings.about"); }
+    Gap { h: 8px; }
+    Card {
+        VerticalLayout {
+            Row {
+                first: true;
+                RowLayout {
+                    Image { source: Icons.logo; width: 32px; height: 32px; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 1px;
+                        HorizontalLayout {
+                            cross-axis-alignment: center;
+                            alignment: start;
+                            spacing: 6px;
+                            Text { text: "VibeLauncher"; font-weight: 500; color: Theme.text; }
+                            Text { text: App.version; color: Theme.text-3; }
+                        }
+                        Text { text: Tr.t(Tr.lang, "settings.aboutBody"); font-size: 12px; color: Theme.text-2; wrap: word-wrap; }
+                        Text { text: Tr.t(Tr.lang, "settings.notAffiliated"); font-size: 12px; color: Theme.text-3; wrap: word-wrap; }
+                        Text {
+                            text: Tr.t(Tr.lang, "settings.madeWith");
+                            font-size: 12px;
+                            color: Theme.accent;
+                            TouchArea { mouse-cursor: pointer; clicked => { App.open-website("slint"); } }
+                        }
+                    }
+                }
+            }
+            Row {
+                RowLayout {
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: Tr.t(Tr.lang, "update.title"); font-weight: 500; color: Theme.text; }
+                        Text { text: App.update-sub; font-size: 12px; color: App.update-sub-warn ? Theme.amber : Theme.text-2; wrap: word-wrap; }
+                        if App.update-hint != "": Text { text: App.update-hint; font-size: 12px; color: Theme.text-3; wrap: word-wrap; }
+                        if App.update-phase == "downloading": Rectangle {
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.selected;
+                            Rectangle {
+                                x: App.update-progress < 0 ? mod(animation-tick() / 1ms, 1200) / 1200 * (parent.width + 60px) - 60px : 0;
+                                width: App.update-progress < 0 ? 60px : parent.width * App.update-progress;
+                                border-radius: 2px;
+                                background: Theme.accent;
+                            }
+                        }
+                    }
+                    if App.update-whats-new: Btn {
+                        size: "sm"; kind: "ghost";
+                        text: Tr.t(Tr.lang, "action.whatsNew");
+                        clicked => { App.open-website("releases"); }
+                    }
+                    Btn {
+                        size: "sm";
+                        kind: App.update-button == "check" ? "" : "primary";
+                        text: App.update-button == "install" ? Tr.t(Tr.lang, "action.updateRestart") : App.update-button == "download" ? Tr.t(Tr.lang, "action.download") : Tr.t(Tr.lang, "action.checkNow");
+                        busy: App.update-busy;
+                        clicked => { App.update-action(); }
+                    }
+                }
+            }
+            Row {
+                RowLayout {
+                    TitleSub { title: Tr.t(Tr.lang, "update.auto"); sub: Tr.t(Tr.lang, "update.autoHint"); }
+                    Switch {
+                        on: App.check-updates;
+                        label: Tr.t(Tr.lang, "update.auto");
+                        toggled(v) => { App.set-check-updates(v); }
+                    }
+                }
+            }
+            Row {
+                RowLayout {
+                    Text { text: Tr.t(Tr.lang, "settings.website"); color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Btn { size: "sm"; text: "GitHub"; clicked => { App.open-website("home"); } }
+                    Btn { size: "sm"; text: Tr.t(Tr.lang, "settings.issues"); clicked => { App.open-website("issues"); } }
+                }
+            }
+            Row {
+                RowLayout { TitleSub { title: Tr.t(Tr.lang, "settings.command"); sub: App.cli; mono: true; } }
+            }
+            Row {
+                RowLayout {
+                    TitleSub { title: Tr.t(Tr.lang, "settings.config"); sub: App.config-file; mono: true; }
+                    Btn { size: "sm"; text: Tr.t(Tr.lang, "action.show"); clicked => { App.reveal-config(); } }
+                }
+            }
+        }
+    }
+}
+
+export component WelcomePage inherits Page {
+    column-width: 460px;
+    Gap { h: 24px; }
+    HorizontalLayout {
+        cross-axis-alignment: center; alignment: center; Image { source: Icons.logo; width: 56px; height: 56px; } }
+    Gap { h: 18px; }
+    Text {
+        text: App.any-installed ? Tr.t(Tr.lang, "onb.title") : Tr.t(Tr.lang, "empty.title");
+        font-size: 22px; font-weight: 600; color: Theme.text;
+        horizontal-alignment: center; wrap: word-wrap;
+    }
+    Gap { h: 8px; }
+    Text {
+        text: App.any-installed ? Tr.t(Tr.lang, "onb.body") : Tr.t(Tr.lang, "empty.body");
+        font-size: 13.5px; color: Theme.text-2;
+        horizontal-alignment: center; wrap: word-wrap;
+    }
+    Gap { h: 24px; }
+    Card {
+        VerticalLayout {
+            for a[i] in App.apps: Row {
+                first: i == 0;
+                RowLayout {
+                    AppIcon { icon: a.icon; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text { text: a.name; font-weight: 500; color: Theme.text; }
+                        Text { text: a.found; font-size: 12px; color: a.installed ? Theme.text-2 : Theme.text-3; }
+                    }
+                    Icon {
+                        size: 18px;
+                        source: a.installed ? Icons.circle-check : Icons.minus;
+                        colorize: a.installed ? Theme.green : Theme.text-3;
+                    }
+                }
+            }
+        }
+    }
+    if App.any-installed: VerticalLayout {
+        padding-top: 20px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        for p in [Tr.t(Tr.lang, "onb.p1"), Tr.t(Tr.lang, "onb.p2"), Tr.t(Tr.lang, "onb.p3")]: HorizontalLayout {
+            spacing: 10px;
+            Icon { source: Icons.check; size: 15px; colorize: Theme.green; }
+            Text { text: p; color: Theme.text-2; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+    }
+    Gap { h: 24px; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        alignment: center;
+        spacing: 10px;
+        if App.any-installed: Btn { size: "lg"; text: Tr.t(Tr.lang, "onb.skip"); clicked => { App.welcome-skip(); } }
+        if App.any-installed: Btn { size: "lg"; kind: "primary"; text: Tr.t(Tr.lang, "onb.start"); icon: Icons.plus; has-icon: true; clicked => { App.welcome-start(); } }
+        if !App.any-installed: Btn { size: "lg"; text: Tr.t(Tr.lang, "detail.openSettings"); clicked => { App.select("settings", ""); } }
+        if !App.any-installed: Btn {
+            size: "lg"; kind: "primary";
+            text: Tr.t(Tr.lang, "action.findAgain");
+            icon: Icons.refresh; has-icon: true;
+            busy: App.apps-busy == "refresh";
+            clicked => { App.find-apps(); }
+        }
+    }
+}

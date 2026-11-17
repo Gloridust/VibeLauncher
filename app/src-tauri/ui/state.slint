@@ -1,0 +1,234 @@
+// Everything the window shows, filled in by the Rust side, and everything the
+// user can do, handled there.
+
+import { SegOption } from "widgets.slint";
+
+export struct SideRow {
+    header: bool,
+    provider: string,
+    label: string,
+    note: string,
+    collapsed: bool,
+    id: string,
+    icon: image,
+    color: color,
+    running: bool,
+    lost: bool,
+    pending: bool,
+}
+
+export struct ProfileView {
+    id: string,
+    name: string,
+    provider: string,
+    app-name: string,
+    app-installed: bool,
+    color: color,
+    icon: image,
+    isolated: bool,
+    running: bool,
+    lost: bool,
+    pending: bool,
+    first-run: bool,
+    data-dir: string,
+    size: string,
+    shortcut: bool,
+    shortcut-hint: string,
+    shortcut-broken: bool,
+    last-opened: string,
+    env-text: string,
+    args-text: string,
+    can-move-up: bool,
+    can-move-down: bool,
+}
+
+export struct AppRow {
+    provider: string,
+    name: string,
+    icon: image,
+    installed: bool,
+    version: string,
+    path: string,
+    manual: bool,
+    found: string,
+    route-title: string,
+    route-status: string,
+    route-warn: bool,
+    route-on: bool,
+    route-supported: bool,
+    route-experimental: bool,
+}
+
+export struct CheckRow {
+    id: string,
+    level: string,
+    title: string,
+    detail: string,
+    has-fix: bool,
+    fix-label: string,
+}
+
+export struct ChoiceRow {
+    id: string,
+    name: string,
+    icon: image,
+    color: color,
+    running: bool,
+    sub: string,
+}
+
+export struct ToastItem {
+    id: int,
+    text: string,
+    error: bool,
+}
+
+export global App {
+    // ── window ──
+    in property <bool> maximized;
+    in property <string> version;
+    in property <string> load-error;
+    in property <bool> loaded;
+    // "welcome" | "profile" | "diagnostics" | "settings"
+    in property <string> page: "welcome";
+    in property <[SideRow]> side-rows;
+    in property <int> issues;
+    in property <bool> issues-red;
+    in property <bool> update-badge;
+
+    // ── profile page ──
+    in property <ProfileView> profile;
+    in-out property <bool> detail-advanced;
+    in property <string> busy;
+
+    // ── welcome ──
+    in property <bool> any-installed;
+    in property <[AppRow]> apps;
+
+    // ── diagnostics ──
+    in property <bool> checks-loaded;
+    in property <[CheckRow]> checks;
+    in property <string> summary;
+    in property <string> summary-level;
+    in property <string> log-text;
+    in property <int> log-state;
+    in property <bool> checking;
+    in property <string> fixing;
+
+    // ── settings ──
+    in property <string> language;
+    in property <string> theme;
+    in property <string> apps-busy;
+    in property <int> stagger;
+    in property <bool> check-updates;
+    in property <string> cli;
+    in property <string> config-file;
+    in property <string> update-sub;
+    in property <bool> update-sub-warn;
+    in property <string> update-hint;
+    in property <string> update-phase;
+    in property <float> update-progress: -1;
+    // "install" | "download" | "check"
+    in property <string> update-button;
+    in property <bool> update-busy;
+    in property <bool> update-whats-new;
+
+    // ── sheets: "" | "new" | "edit" | "delete" | "login" | "route" ──
+    in property <string> sheet;
+
+    in-out property <string> ps-name;
+    in property <bool> ps-editing;
+    in property <bool> ps-is-default;
+    in property <string> ps-provider;
+    in property <[SegOption]> ps-providers;
+    in property <color> ps-color;
+    in property <[color]> ps-colors;
+    in-out property <bool> ps-shortcut;
+    in property <string> ps-shortcut-hint;
+    in-out property <bool> ps-advanced;
+    in-out property <string> ps-data-root;
+    in property <string> ps-default-path;
+    in-out property <string> ps-env;
+    in-out property <string> ps-args;
+    in property <string> ps-error;
+    in property <bool> ps-saving;
+
+    in property <string> del-title;
+    in property <string> del-sub;
+    in-out property <bool> del-with-data;
+    in property <string> del-hint;
+    in property <string> del-confirm;
+    in property <bool> del-busy;
+    in property <string> del-error;
+
+    in property <string> login-title;
+    in property <[string]> login-steps;
+    // "starting" | "waiting" | "done" | "expired" | "error"
+    in property <string> login-phase;
+    in property <string> login-wait;
+    in property <float> login-left: 1;
+    in property <string> login-routing-hint;
+    in property <string> login-paste-body;
+    in property <string> login-placeholder;
+    in-out property <string> login-link;
+    in property <bool> login-sending;
+    in property <string> login-error;
+
+    in property <string> route-title;
+    in property <string> route-sub;
+    in property <[ChoiceRow]> route-choices;
+    in property <string> route-busy;
+    in property <string> route-error;
+
+    in property <[ToastItem]> toasts;
+
+    // ── what the user does ──
+    callback select(string /* kind */, string /* id */);
+    callback new-profile(string /* provider or "" */);
+    callback toggle-section(string);
+    callback launch(string);
+    callback sign-in(string);
+    callback quit(string);
+    callback restart(string);
+    callback cancel-login();
+    callback edit(string);
+    callback delete(string);
+    callback show-data(string);
+    callback copy-command(string);
+    callback move-profile(string, int);
+    callback set-shortcut(string, bool);
+    callback repair-shortcuts();
+    callback recheck();
+    callback fix(string);
+    callback set-language(string);
+    callback set-theme(string);
+    callback find-apps();
+    callback choose-app(string);
+    callback reset-app(string);
+    callback set-route(string, bool);
+    callback set-stagger(int);
+    callback set-check-updates(bool);
+    callback update-action();
+    callback open-website(string);
+    callback reveal-config();
+    callback welcome-skip();
+    callback welcome-start();
+
+    callback sheet-close();
+    callback ps-name-edited(string);
+    callback ps-choose-provider(string);
+    callback ps-choose-color(color);
+    callback ps-pick-folder();
+    callback ps-save();
+    callback del-confirm-clicked();
+    callback login-again();
+    callback login-send();
+    callback login-paste();
+    callback route-pick(string);
+
+    callback win-drag();
+    callback win-minimize();
+    callback win-maximize();
+    callback win-close();
+    callback win-resize(int /* 0 n, 1 ne, 2 e, 3 se, 4 s, 5 sw, 6 w, 7 nw */);
+}

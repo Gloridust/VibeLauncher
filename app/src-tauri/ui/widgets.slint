@@ -1,0 +1,405 @@
+// Small controls, drawn to match the rest of the window in both themes.
+
+import { Theme, Icons } from "theme.slint";
+
+export component Icon inherits Image {
+    in property <length> size: 16px;
+    width: size;
+    height: size;
+    colorize: Theme.text-2;
+    image-fit: contain;
+}
+
+export component Spinner {
+    in property <length> size: 15px;
+    in property <color> colorize: Theme.text-2;
+    width: size;
+    height: size;
+    Image {
+        width: size;
+        height: size;
+        source: Icons.loader;
+        colorize: root.colorize;
+        transform-rotation: mod(animation-tick() / 1ms, 900) / 900 * 360deg;
+    }
+}
+
+// kind: "" | "primary" | "danger" | "ghost"; size: "sm" | "md" | "lg"
+export component Btn {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <string> kind;
+    in property <string> size: "md";
+    in property <bool> enabled: true;
+    in property <bool> busy: false;
+    callback clicked();
+    property <color> fg: kind == "primary" ? Theme.primary-text : kind == "danger" ? #ffffff : Theme.text;
+    min-height: size == "sm" ? 26px : size == "lg" ? 34px : 30px;
+    max-height: self.min-height;
+    horizontal-stretch: 0;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { if (enabled) { clicked(); } }
+    bg := Rectangle {
+        border-radius: size == "sm" ? 7px : 8px;
+        border-width: kind == "" ? 1px : 0;
+        border-color: Theme.line-strong;
+        background: kind == "primary" ? Theme.primary : kind == "danger" ? Theme.red : kind == "ghost" ? (ta.has-hover && enabled ? Theme.hover : transparent) : (ta.has-hover && enabled ? Theme.subtle : Theme.card);
+        opacity: !enabled ? 0.45 : (kind == "primary" || kind == "danger") && ta.has-hover ? 0.88 : 1;
+    }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: size == "sm" ? 10px : size == "lg" ? 16px : 12px;
+        padding-right: self.padding-left;
+        spacing: 6px;
+        alignment: center;
+        opacity: enabled ? 1 : 0.45;
+        if busy: Spinner { size: size == "sm" ? 13px : 15px; colorize: fg; }
+        if has-icon && !busy: Icon { source: icon; size: size == "sm" ? 13px : 15px; colorize: fg; }
+        Text {
+            text: root.text;
+            color: fg;
+            font-size: size == "sm" ? 12px : 13px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled && !root.busy;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component IconBtn {
+    in property <image> icon;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <length> size: 30px;
+    in property <color> hover-bg: Theme.hover;
+    in property <color> fg: Theme.text-2;
+    callback clicked();
+    width: size;
+    height: size;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-action-default => { clicked(); }
+    Rectangle {
+        border-radius: 8px;
+        background: active ? Theme.selected : ta.has-hover && enabled ? hover-bg : transparent;
+    }
+    Icon {
+        source: icon;
+        size: 17px;
+        colorize: active ? Theme.text : fg;
+        opacity: enabled ? 1 : 0.4;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Switch {
+    in property <bool> on;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback toggled(bool);
+    width: 32px;
+    height: 19px;
+    accessible-role: switch;
+    accessible-checkable: true;
+    accessible-checked: on;
+    accessible-label: label;
+    accessible-action-default => { if (enabled) { toggled(!on); } }
+    Rectangle {
+        border-radius: 10px;
+        background: on ? Theme.green : Theme.line-strong;
+        opacity: enabled ? 1 : 0.45;
+        animate background { duration: 120ms; }
+    }
+    Rectangle {
+        width: 15px;
+        height: 15px;
+        y: 2px;
+        x: on ? 15px : 2px;
+        border-radius: 7.5px;
+        background: #ffffff;
+        drop-shadow-blur: 2px;
+        drop-shadow-color: #00000033;
+        drop-shadow-offset-y: 1px;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.toggled(!root.on); }
+    }
+}
+
+export struct SegOption {
+    value: string,
+    label: string,
+    icon: image,
+    has-icon: bool,
+    disabled: bool,
+}
+
+export component Segmented {
+    in property <[SegOption]> options;
+    in property <string> value;
+    callback chosen(string);
+    min-height: 30px;
+    horizontal-stretch: 0;
+    Rectangle { border-radius: 9px; background: Theme.selected; }
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for o in options: Rectangle {
+            border-radius: 7px;
+            background: o.value == root.value ? Theme.card : transparent;
+            drop-shadow-blur: o.value == root.value ? 2px : 0;
+            drop-shadow-color: #0000001a;
+            drop-shadow-offset-y: 1px;
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 6px;
+                opacity: o.disabled ? 0.45 : 1;
+                if o.has-icon: Image { source: o.icon; width: 16px; height: 16px; }
+                Text {
+                    text: o.label;
+                    font-size: 12.5px;
+                    font-weight: 500;
+                    color: o.value == root.value ? Theme.text : Theme.text-2;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                enabled: !o.disabled;
+                clicked => { root.chosen(o.value); }
+            }
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.line;
+    background: Theme.card;
+    clip: true;
+}
+
+// A row in a card; the separator line is drawn above every row but the first.
+export component Row inherits Rectangle {
+    in property <bool> first: false;
+    min-height: 48px;
+    if !first: Rectangle { y: 0; height: 1px; background: Theme.line; }
+}
+
+export component SectionTitle inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+    color: Theme.text-2;
+}
+
+export component Hint inherits Text {
+    font-size: 12px;
+    color: Theme.text-2;
+    wrap: word-wrap;
+}
+
+export component Dot inherits Rectangle {
+    in property <bool> amber;
+    width: 7px;
+    height: 7px;
+    border-radius: 3.5px;
+    background: amber ? Theme.amber : Theme.green;
+}
+
+// kind: "" | "green" | "amber"
+export component Pill {
+    in property <string> text;
+    in property <string> kind;
+    in property <bool> dot;
+    in property <bool> key;
+    horizontal-stretch: 0;
+    height: 22px;
+    Rectangle {
+        border-radius: 11px;
+        background: kind == "green" ? #2f9e621f : kind == "amber" ? Theme.amber-soft : Theme.selected;
+    }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 5px;
+        if dot: Dot { amber: kind == "amber"; }
+        if key: Icon { source: Icons.key-round; size: 12px; colorize: Theme.amber; }
+        Text {
+            text: root.text;
+            font-size: 11.5px;
+            font-weight: 500;
+            vertical-alignment: center;
+            color: kind == "green" ? Theme.green : kind == "amber" ? Theme.amber : Theme.text-2;
+        }
+    }
+}
+
+// kind: "amber" | "accent"
+export component Banner inherits Rectangle {
+    in property <string> kind: "amber";
+    in property <image> icon;
+    in property <string> title;
+    in property <string> body;
+    border-radius: 12px;
+    background: kind == "amber" ? Theme.amber-soft : Theme.accent-soft;
+    border-width: 1px;
+    border-color: kind == "amber" ? #c27c0e33 : #c9644233;
+    HorizontalLayout {
+        cross-axis-alignment: start;
+        padding: 14px;
+        spacing: 12px;
+        Icon { source: icon; size: 18px; colorize: kind == "amber" ? Theme.amber : Theme.accent; }
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: title; font-weight: 600; color: Theme.text; wrap: word-wrap; }
+            Text { text: body; font-size: 12.5px; color: Theme.text-2; wrap: word-wrap; }
+            HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-top: 6px;
+                spacing: 8px;
+                alignment: start;
+                @children
+            }
+        }
+    }
+}
+
+export component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> mono;
+    in property <bool> multiline;
+    in property <int> rows: 1;
+    in property <bool> enabled: true;
+    out property <bool> focused: input.has-focus;
+    callback edited(string);
+    callback accepted();
+    public function focus-input() { input.focus(); }
+    min-height: multiline ? rows * 18px + 16px : 32px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line-strong;
+    background: Theme.field;
+    if input.has-focus: Rectangle {
+        x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px;
+        border-radius: 10px;
+        border-width: 3px;
+        border-color: #c9644238;
+    }
+    clip := Rectangle {
+        x: 10px;
+        width: parent.width - 20px;
+        y: multiline ? 8px : 0;
+        height: multiline ? parent.height - 16px : parent.height;
+        clip: true;
+        if root.text == "" && (!input.has-focus || root.multiline): Text {
+            width: 100%;
+            height: root.multiline ? self.preferred-height : parent.height;
+            y: 0;
+            text: root.placeholder;
+            color: Theme.text-3;
+            font-size: root.mono ? 12px : 13px;
+            font-family: root.mono ? Theme.mono : "";
+            vertical-alignment: root.multiline ? top : center;
+            overflow: elide;
+        }
+        input := TextInput {
+            width: root.multiline ? parent.width : max(self.preferred-width, parent.width);
+            height: root.multiline ? max(self.preferred-height, parent.height) : parent.height;
+            text <=> root.text;
+            enabled: root.enabled;
+            single-line: !root.multiline;
+            wrap: root.multiline ? word-wrap : no-wrap;
+            color: Theme.text;
+            selection-background-color: Theme.accent-soft;
+            selection-foreground-color: Theme.text;
+            font-size: root.mono ? 12px : 13px;
+            font-family: root.mono ? Theme.mono : "";
+            vertical-alignment: root.multiline ? top : center;
+            edited => { root.edited(self.text); }
+            accepted => { root.accepted(); }
+        }
+    }
+}
+
+export component Disclosure {
+    in property <string> text;
+    in property <bool> open;
+    callback toggled();
+    height: 24px;
+    horizontal-stretch: 0;
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        spacing: 4px;
+        Icon { source: Icons.chevron-right; size: 14px; transform-rotation: open ? 90deg : 0deg; animate transform-rotation { duration: 120ms; } }
+        Text { text: root.text; font-size: 12px; font-weight: 600; color: Theme.text-2; vertical-alignment: center; }
+    }
+    TouchArea { clicked => { root.toggled(); } }
+}
+
+export component Swatches {
+    in property <[color]> colors;
+    in property <color> value;
+    callback chosen(color);
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        spacing: 10px;
+        alignment: start;
+        for c in colors: Rectangle {
+            width: 22px;
+            height: 22px;
+            if c == root.value: Rectangle {
+                x: -4px; y: -4px; width: 30px; height: 30px;
+                border-radius: 15px;
+                border-width: 2px;
+                border-color: Theme.text;
+                opacity: 0.85;
+            }
+            Rectangle { border-radius: 11px; background: c; }
+            TouchArea { clicked => { root.chosen(c); } }
+        }
+    }
+}
+
+// A profile's picture: its rendered icon, or a coloured tile.
+export component ProfileIcon {
+    in property <image> icon;
+    in property <color> color;
+    in property <length> size: 20px;
+    width: size;
+    height: size;
+    if icon.width > 0: Image { width: size; height: size; source: icon; }
+    if icon.width == 0: Rectangle { border-radius: size / 4; background: color; }
+}
+
+export component Checkbox {
+    in property <bool> checked;
+    callback toggled(bool);
+    width: 16px;
+    height: 16px;
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: checked;
+    Rectangle {
+        border-radius: 4px;
+        border-width: checked ? 0 : 1px;
+        border-color: Theme.line-strong;
+        background: checked ? Theme.accent : Theme.field;
+    }
+    if checked: Icon { source: Icons.check; size: 12px; colorize: #ffffff; }
+    TouchArea { clicked => { root.toggled(!root.checked); } }
+}

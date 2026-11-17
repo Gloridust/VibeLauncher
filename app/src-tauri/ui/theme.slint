@@ -1,0 +1,77 @@
+// Colours, text and icons shared by every part of the window.
+
+import { Palette } from "std-widgets.slint";
+
+export global Theme {
+    // "auto" follows the system.
+    in property <string> mode: "auto";
+    out property <bool> dark: mode == "dark" || (mode == "auto" && Palette.color-scheme == ColorScheme.dark);
+    in property <bool> mac;
+    in property <bool> windows;
+    out property <color> bg: dark ? #262624 : #ffffff;
+    out property <color> sidebar: dark ? #1f1e1d : #f5f4f0;
+    out property <color> sidebar-border: dark ? #ffffff0f : #1f1e1c12;
+    out property <color> text: dark ? #f2f0ea : #1f1e1c;
+    out property <color> text-2: dark ? #b4b1a9 : #65635e;
+    out property <color> text-3: dark ? #85827b : #9b9892;
+    out property <color> line: dark ? #ffffff14 : #1f1e1c17;
+    out property <color> line-strong: dark ? #ffffff26 : #1f1e1c29;
+    out property <color> hover: dark ? #ffffff0d : #1f1e1c0b;
+    out property <color> selected: dark ? #ffffff16 : #1f1e1c13;
+    out property <color> card: dark ? #2c2c29 : #ffffff;
+    out property <color> field: dark ? #30302d : #ffffff;
+    out property <color> subtle: dark ? #2a2a27 : #faf9f7;
+    out property <color> accent: dark ? #d97757 : #c96442;
+    out property <color> accent-soft: dark ? #d9775724 : #c964421a;
+    out property <color> primary: dark ? #f2f0ea : #1f1e1c;
+    out property <color> primary-text: dark ? #1f1e1c : #ffffff;
+    out property <color> green: dark ? #4cc38a : #2f9e62;
+    out property <color> amber: dark ? #e2a336 : #c27c0e;
+    out property <color> amber-soft: dark ? #e2a3361f : #c27c0e17;
+    out property <color> red: dark ? #ef6a5e : #c4372b;
+    out property <color> red-soft: dark ? #ef6a5e1f : #c4372b14;
+    out property <color> blue: dark ? #6ea2ff : #2f6fd6;
+    out property <color> backdrop: dark ? #0000006b : #1c1a1638;
+    out property <color> shadow: dark ? #00000080 : #0000002e;
+    out property <string> mono: mac ? "Menlo" : windows ? "Consolas" : "DejaVu Sans Mono";
+}
+
+// Interface text. The language is an argument so that every binding that
+// shows text depends on it and changes with it.
+export global Tr {
+    in property <string> lang: "en";
+    pure callback t(string, string) -> string;
+    pure callback t1(string, string, string, string) -> string;
+}
+
+export global Icons {
+    out property <image> check: @image-url("icons/check.svg");
+    out property <image> chevron-down: @image-url("icons/chevron-down.svg");
+    out property <image> chevron-right: @image-url("icons/chevron-right.svg");
+    out property <image> circle-alert: @image-url("icons/circle-alert.svg");
+    out property <image> circle-check: @image-url("icons/circle-check.svg");
+    out property <image> clipboard: @image-url("icons/clipboard.svg");
+    out property <image> copy: @image-url("icons/copy.svg");
+    out property <image> ellipsis: @image-url("icons/ellipsis.svg");
+    out property <image> folder-open: @image-url("icons/folder-open.svg");
+    out property <image> info: @image-url("icons/info.svg");
+    out property <image> key-round: @image-url("icons/key-round.svg");
+    out property <image> loader: @image-url("icons/loader-circle.svg");
+    out property <image> minus: @image-url("icons/minus.svg");
+    out property <image> package: @image-url("icons/package.svg");
+    out property <image> package-x: @image-url("icons/package-x.svg");
+    out property <image> pencil: @image-url("icons/pencil.svg");
+    out property <image> play: @image-url("icons/play.svg");
+    out property <image> plus: @image-url("icons/plus.svg");
+    out property <image> power: @image-url("icons/power.svg");
+    out property <image> refresh: @image-url("icons/refresh-cw.svg");
+    out property <image> rotate: @image-url("icons/rotate-cw.svg");
+    out property <image> settings: @image-url("icons/settings.svg");
+    out property <image> shield-check: @image-url("icons/shield-check.svg");
+    out property <image> stethoscope: @image-url("icons/stethoscope.svg");
+    out property <image> trash: @image-url("icons/trash.svg");
+    out property <image> triangle-alert: @image-url("icons/triangle-alert.svg");
+    out property <image> wrench: @image-url("icons/wrench.svg");
+    out property <image> x: @image-url("icons/x.svg");
+    out property <image> logo: @image-url("logo.svg");
+}

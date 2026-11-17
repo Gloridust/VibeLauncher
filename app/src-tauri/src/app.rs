@@ -1624,34 +1624,12 @@ fn wire(win: &AppWindow) {
         }
     };
     let wd = winit_do.clone();
-    g.on_win_drag(move || wd(&|w| {
-        let _ = w.drag_window();
-    }));
-    let wd = winit_do.clone();
     g.on_win_minimize(move || wd(&|w| w.set_minimized(true)));
     let wd = winit_do.clone();
     g.on_win_maximize(move || wd(&|w| w.set_maximized(!w.is_maximized())));
     g.on_win_close(|| {
         let _ = slint::quit_event_loop();
     });
-    let wd = winit_do.clone();
-    g.on_win_resize(move |dir| {
-        use winit::window::ResizeDirection as R;
-        let d = match dir {
-            0 => R::North,
-            1 => R::NorthEast,
-            2 => R::East,
-            3 => R::SouthEast,
-            4 => R::South,
-            5 => R::SouthWest,
-            6 => R::West,
-            _ => R::NorthWest,
-        };
-        wd(&|w| {
-            let _ = w.drag_resize_window(d);
-        });
-    });
-
     g.on_select(|kind, id| {
         ctl(|c| match kind.as_str() {
             "profile" => c.select(View::Profile(id.to_string())),

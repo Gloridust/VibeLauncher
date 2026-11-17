@@ -4,7 +4,7 @@ import { Theme, Tr, Icons } from "theme.slint";
 import { Icon, IconBtn, Btn, SegOption } from "widgets.slint";
 import { App, SideRow, ProfileView, AppRow, CheckRow, ChoiceRow, ToastItem } from "state.slint";
 import { Sidebar } from "sidebar.slint";
-import { DragArea, WindowButtons, ResizeEdges } from "chrome.slint";
+import { DragArea, WindowButtons } from "chrome.slint";
 import { ProfilePage, DiagnosticsPage, SettingsPage, WelcomePage } from "pages.slint";
 import { ProfileSheet, DeleteSheet, LoginSheet, RouteSheet } from "sheets.slint";
 
@@ -46,6 +46,8 @@ export component AppWindow inherits Window {
     default-font-size: 13px;
     // Outside macOS the window draws its own title bar.
     no-frame: !Theme.mac;
+    // Resizing a frameless window from its edges (handled by the backend).
+    resize-border-width: Theme.mac || App.maximized ? 0 : 6px;
 
     forward-focus: keys;
     keys := FocusScope {
@@ -177,5 +179,4 @@ export component AppWindow inherits Window {
         border-width: 1px;
         border-color: Theme.line-strong;
     }
-    if !Theme.mac && !App.maximized: ResizeEdges { width: root.width; height: root.height; }
 }

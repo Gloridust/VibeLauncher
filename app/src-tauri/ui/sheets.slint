@@ -1,5 +1,5 @@
 import { Theme, Tr, Icons } from "theme.slint";
-import { Icon, Btn, Switch, Segmented, Field, Disclosure, Swatches, ProfileIcon, Spinner, Checkbox, Dot, Hint } from "widgets.slint";
+import { Icon, Btn, Switch, Field, Disclosure, Swatches, ProfileIcon, Spinner, Checkbox, Dot, Hint, SegOption } from "widgets.slint";
 import { App } from "state.slint";
 
 // A modal card over a dimmed window. Escape and a click outside close it.
@@ -65,6 +65,99 @@ component ErrorText inherits Text {
     wrap: word-wrap;
 }
 
+component PickerItem {
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 32px;
+    Rectangle { border-radius: 6px; background: ta.has-hover && root.enabled ? Theme.hover : transparent; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        opacity: root.enabled ? 1 : 0.4;
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            if root.has-icon: Image { source: root.icon; width: 16px; height: 16px; }
+        }
+        Text { text: root.text; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        Rectangle {
+            width: 14px;
+            if root.checked: Icon { source: Icons.check; size: 14px; colorize: Theme.accent; }
+        }
+    }
+    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+// Which app a new profile is for: the apps VibeLauncher knows, and
+// "Other app…" to add one.
+component AppPicker {
+    in property <[SegOption]> options;
+    in property <string> value;
+    in property <bool> enabled: true;
+    in property <string> other-label;
+    callback chosen(string);
+    callback other();
+    height: 32px;
+    min-width: 200px;
+    Rectangle {
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Theme.line;
+        background: ta.has-hover && root.enabled ? Theme.hover : Theme.card;
+    }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 8px;
+        opacity: root.enabled ? 1 : 0.6;
+        for o in root.options: HorizontalLayout {
+            visible: o.value == root.value;
+            width: o.value == root.value ? self.preferred-width : 0;
+            spacing: 8px;
+            cross-axis-alignment: center;
+            if o.has-icon: Image { source: o.icon; width: 16px; height: 16px; }
+            Text { text: o.label; color: Theme.text; vertical-alignment: center; font-weight: 500; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if root.enabled: Icon { source: Icons.chevron-down; size: 14px; colorize: Theme.text-3; }
+    }
+    ta := TouchArea { enabled: root.enabled; clicked => { menu.show(); } }
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 260px);
+        Rectangle {
+            border-radius: 10px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.shadow;
+        }
+        VerticalLayout {
+            padding: 5px;
+            for o in root.options: PickerItem {
+                icon: o.icon;
+                has-icon: o.has-icon;
+                text: o.label;
+                checked: o.value == root.value;
+                enabled: !o.disabled;
+                clicked => { root.chosen(o.value); }
+            }
+            Rectangle { height: 9px; Rectangle { y: 4px; height: 1px; background: Theme.line; } }
+            PickerItem { icon: Icons.plus; has-icon: true; text: root.other-label; clicked => { root.other(); } }
+        }
+    }
+}
+
 export component ProfileSheet inherits Sheet {
     title: App.ps-editing ? Tr.t(Tr.lang, "sheet.editTitle") : Tr.t(Tr.lang, "sheet.newTitle");
     sheet-width: 500px;
@@ -86,7 +179,22 @@ export component ProfileSheet inherits Sheet {
         HorizontalLayout {
             cross-axis-alignment: center;
             alignment: start;
-            Segmented { options: App.ps-providers; value: App.ps-provider; chosen(v) => { App.ps-choose-provider(v); } }
+            spacing: 10px;
+            AppPicker {
+                options: App.ps-providers;
+                value: App.ps-provider;
+                enabled: !App.ps-editing && !App.ps-app-checking;
+                other-label: Tr.t(Tr.lang, "sheet.otherApp");
+                chosen(v) => { App.ps-choose-provider(v); }
+                other => { App.ps-other-app(); }
+            }
+            if App.ps-app-checking: Spinner {}
+        }
+        if App.ps-app-note != "": Text {
+            text: App.ps-app-note;
+            font-size: 12px;
+            color: App.ps-app-note-warn ? Theme.amber : Theme.text-2;
+            wrap: word-wrap;
         }
     }
     VerticalLayout {

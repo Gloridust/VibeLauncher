@@ -11,6 +11,17 @@ VibeLauncher adds the app-specific settings that make the separation complete:
 | Claude | `--user-data-dir=<profile>/electron` | `CLAUDE_CONFIG_DIR=<profile>/claude-config` |
 | ChatGPT | `--user-data-dir=<profile>/electron` | `CODEX_ELECTRON_USER_DATA_PATH`, `CODEX_HOME=<profile>/codex-home` |
 
+Other apps can be added (**Other app…**, or `vibelauncher app add`). Only Electron and Chromium
+apps are accepted, because only they keep everything in a folder VibeLauncher can choose; they are
+recognised by the files every build ships (`resources/app.asar`, `v8_context_snapshot.bin`, the
+Electron framework in a `.app`; an AppImage is mounted to look inside). Flatpak and Snap apps are
+turned away, since their sandbox decides where data goes. An added app's profiles get only
+`--user-data-dir`, and no link routing. Because an app can still pick its own folder in code,
+Diagnostics warns when a profile's folder is still empty after it ran
+(`crates/vl-core/src/detect.rs`, and `not-isolated` in `doctor.rs`). Added apps are stored as
+`[[app]]` in `profiles.toml`, which is then written as schema 2 so older versions ask to be
+updated instead of misreading it.
+
 The app is found fresh every time (desktop entries including Flatpak and Snap on Linux; Spotlight
 and `/Applications` on macOS; Store packages and per-user installs on Windows), so moving or
 updating it doesn't break profiles.
@@ -31,8 +42,8 @@ Updates: the window checks `latest.json` on the latest GitHub release when it op
 turned off in Settings). With the beta program on (Settings; the default in a beta build), it
 reads `releases.atom` instead and uses the manifest of the highest published version,
 prereleases included; if that fails, it falls back to the latest release. Installing downloads
-the package of the same kind as the running copy, checks its signature against the public key (`app/src-tauri/src/update.rs`, also in
-`tauri.conf.json`), and installs it: the AppImage
+the package of the same kind as the running copy, checks its signature against the public key
+(`app/src-tauri/src/update.rs`, also in `tauri.conf.json`), and installs it: the AppImage
 and the `.app` replace themselves, Windows runs the installer in update mode (the hooks keep
 links and shortcuts), and deb/rpm packages are installed with a single `pkexec` prompt. A build
 that isn't a package (`cargo run`) only points to the download page.
@@ -49,8 +60,10 @@ vibelauncher list [--json]           List profiles and whether they are running
 vibelauncher launch <profile> [URL]  Open a profile (and hand it a link)
 vibelauncher login <profile>         Open a profile to sign in
 vibelauncher quit <profile>          Ask a profile's app to quit
-vibelauncher create <name> --app claude|chatgpt [--shortcut]
+vibelauncher create <name> --app claude|chatgpt|<added app> [--shortcut]
 vibelauncher delete <profile> [--delete-data]
+vibelauncher app add <path> [--name N]  Add an Electron or Chromium app
+vibelauncher app list|remove <app>
 vibelauncher doctor [--fix]          Find and fix common problems
 vibelauncher scheme status|claim|release
 vibelauncher log                     Recent link-routing decisions

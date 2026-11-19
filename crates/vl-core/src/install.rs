@@ -1,4 +1,5 @@
-//! Finding the installed official apps.
+//! Finding the installed official apps, and building the install of an app
+//! the user added.
 //!
 //! Nothing is hard-coded as *the* location: each platform asks the system
 //! first (desktop entries / Launch Services / MSIX packages), then falls back
@@ -8,12 +9,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::provider::ProviderKind;
+use crate::model::CustomApp;
+use crate::provider::{AppId, ProviderKind};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInstall {
-    pub provider: ProviderKind,
+    pub provider: AppId,
     /// The command to run; `base_args` go right after it (e.g. a Flatpak's
     /// `run --branch=… app.id`).
     pub program: PathBuf,
@@ -33,9 +35,9 @@ pub struct AppInstall {
 }
 
 impl AppInstall {
-    fn new(provider: ProviderKind, program: PathBuf, source: &str) -> Self {
+    fn new(provider: impl Into<AppId>, program: PathBuf, source: &str) -> Self {
         let mut me = Self {
-            provider,
+            provider: provider.into(),
             match_exes: vec![],
             base_args: vec![],
             bundle: None,
@@ -225,6 +227,46 @@ pub fn from_manual_path(provider: ProviderKind, p: &Path) -> Option<AppInstall> 
     Some(AppInstall::new(provider, p.to_path_buf(), "manual"))
 }
 
+/// The install of an app the user added, from what was recorded when it
+/// was added; `None` once the program is gone.
+pub fn custom_install(app: &CustomApp) -> Option<AppInstall> {
+    let id = AppId::Custom(app.id.clone());
+    let p = &app.program;
+    if !p.exists() {
+        return None;
+    }
+    let mut i = if p.extension().is_some_and(|e| e == "app") {
+        bundle_install(id, p)?
+    } else {
+        let mut i = AppInstall::new(id, p.clone(), "added");
+        i.base_args = app.base_args.clone();
+        i
+    };
+    i.desktop_file = app.desktop_file.clone();
+    if app.icon.as_ref().is_some_and(|f| f.is_file()) {
+        i.icon = app.icon.clone();
+    }
+    // A Windows stub starts the newest `app-<version>` copy, which is the
+    // process that then runs.
+    for exe in crate::detect::versioned_exes(&i.program) {
+        if !i.match_exes.contains(&exe) {
+            i.match_exes.push(exe);
+        }
+    }
+    i.fill_version_and_icon();
+    Some(i)
+}
+
+#[cfg(target_os = "macos")]
+fn bundle_install(id: AppId, bundle: &Path) -> Option<AppInstall> {
+    macos::from_bundle(id, bundle, "added")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn bundle_install(_: AppId, _: &Path) -> Option<AppInstall> {
+    None
+}
+
 /// Locate a command on PATH.
 pub fn which(cmd: &str) -> Option<PathBuf> {
     let cmd_path = Path::new(cmd);
@@ -399,7 +441,7 @@ pub mod macos {
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
-    pub fn from_bundle(provider: ProviderKind, bundle: &Path, source: &str) -> Option<AppInstall> {
+    pub fn from_bundle(provider: impl Into<AppId>, bundle: &Path, source: &str) -> Option<AppInstall> {
         let exe_name = plist_value(bundle, "CFBundleExecutable")?;
         let exe = bundle.join("Contents/MacOS").join(exe_name);
         if !exe.is_file() {

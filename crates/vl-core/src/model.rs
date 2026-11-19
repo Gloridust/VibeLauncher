@@ -8,9 +8,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::paths::{write_atomic, Paths};
-use crate::provider::ProviderKind;
+use crate::provider::{AppId, ProviderKind};
 
-pub const SCHEMA: u32 = 1;
+/// Schema 2 adds `[[app]]` (apps the user added). It is only written when
+/// there is one, so an older VibeLauncher reading the file asks to be
+/// updated instead of failing on an app it doesn't know; without added apps
+/// the file stays schema 1.
+pub const SCHEMA: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -19,7 +23,7 @@ pub struct Profile {
     /// names, shortcut file names and window classes.
     pub id: String,
     pub name: String,
-    pub provider: ProviderKind,
+    pub provider: AppId,
     /// `#RRGGBB`
     pub color: String,
     /// A symbol name from the UI's icon set (e.g. `briefcase`).
@@ -56,11 +60,20 @@ impl Profile {
     }
 
     pub fn default_for(provider: ProviderKind) -> Self {
+        Self::plain(provider.into(), provider.display_name())
+    }
+
+    /// The default profile of an app the user added.
+    pub fn default_for_custom(app: &CustomApp) -> Self {
+        Self::plain(AppId::Custom(app.id.clone()), &app.name)
+    }
+
+    fn plain(provider: AppId, name: &str) -> Self {
         Self {
-            id: provider.default_profile_id().into(),
-            name: provider.display_name().into(),
-            provider,
+            id: provider.default_profile_id(),
+            name: name.into(),
             color: provider.brand_color().into(),
+            provider,
             icon: "house".into(),
             isolated: false,
             data_root: None,
@@ -114,6 +127,29 @@ impl Default for Settings {
     }
 }
 
+/// An Electron or Chromium app the user added (`[[app]]`). Its profiles
+/// are isolated with `--user-data-dir` alone; see [`crate::detect`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomApp {
+    /// Lowercase letters, digits and dashes; never a built-in app's name.
+    pub id: String,
+    pub name: String,
+    /// What runs: the executable, an AppImage, or on macOS the `.app`.
+    pub program: PathBuf,
+    /// Arguments that come before the profile's own (from a desktop entry).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_args: Vec<String>,
+    /// "electron" or "chromium", as detected when it was added.
+    pub engine: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<PathBuf>,
+    /// Linux: the desktop entry it was added from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_file: Option<PathBuf>,
+    pub added_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub schema: u32,
@@ -121,11 +157,13 @@ pub struct Config {
     pub settings: Settings,
     #[serde(default, rename = "profile")]
     pub profiles: Vec<Profile>,
+    #[serde(default, rename = "app", skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<CustomApp>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { schema: SCHEMA, settings: Settings::default(), profiles: vec![] }
+        Self { schema: SCHEMA, settings: Settings::default(), profiles: vec![], apps: vec![] }
     }
 }
 
@@ -152,16 +190,25 @@ impl Config {
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
         paths.ensure()?;
-        let text = toml::to_string_pretty(self)?;
+        let mut out = self.clone();
+        out.schema = if self.apps.is_empty() { 1 } else { SCHEMA };
+        let text = toml::to_string_pretty(&out)?;
         let header = "# VibeLauncher profiles. Edit with the app or `vibelauncher`; hand edits are fine too.\n\n";
         write_atomic(&paths.config_file(), format!("{header}{text}").as_bytes())
     }
 
-    /// Every provider always has its default profile, listed first.
+    /// Every app always has its default profile: the built-in apps' come
+    /// first, an added app's comes after the others.
     pub fn ensure_defaults(&mut self) {
         for p in ProviderKind::ALL {
             if !self.profiles.iter().any(|x| x.id == p.default_profile_id()) {
                 self.profiles.insert(0, Profile::default_for(p));
+            }
+        }
+        for app in &self.apps {
+            let id = AppId::Custom(app.id.clone()).default_profile_id();
+            if !self.profiles.iter().any(|x| x.id == id) {
+                self.profiles.push(Profile::default_for_custom(app));
             }
         }
         for prof in &mut self.profiles {
@@ -169,6 +216,42 @@ impl Config {
                 prof.isolated = false;
             }
         }
+    }
+
+    /// The built-in apps, then the added ones.
+    pub fn app_ids(&self) -> Vec<AppId> {
+        ProviderKind::ALL
+            .into_iter()
+            .map(AppId::Builtin)
+            .chain(self.apps.iter().map(|a| AppId::Custom(a.id.clone())))
+            .collect()
+    }
+
+    pub fn custom_app(&self, id: &str) -> Option<&CustomApp> {
+        self.apps.iter().find(|a| a.id == id)
+    }
+
+    pub fn app_name(&self, app: &AppId) -> String {
+        match app {
+            AppId::Builtin(p) => p.display_name().into(),
+            AppId::Custom(id) => self.custom_app(id).map_or_else(|| id.clone(), |a| a.name.clone()),
+        }
+    }
+
+    /// An id for an app being added, from its name.
+    pub fn unique_app_id(&self, name: &str) -> String {
+        let base = slugify(name);
+        let base = if base.is_empty() { "app".to_string() } else { base };
+        let mut id = base.clone();
+        let mut n = 2;
+        while ProviderKind::parse(&id).is_some()
+            || self.custom_app(&id).is_some()
+            || self.get(&AppId::Custom(id.clone()).default_profile_id()).is_some()
+        {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        id
     }
 
     pub fn get(&self, id: &str) -> Option<&Profile> {
@@ -188,12 +271,12 @@ impl Config {
         })
     }
 
-    pub fn unique_id(&self, name: &str, provider: ProviderKind) -> String {
+    pub fn unique_id(&self, name: &str, provider: &AppId) -> String {
         let base = slugify(name);
         let base = if base.is_empty() { format!("{}-profile", provider.id()) } else { base };
         let mut id = base.clone();
         let mut n = 2;
-        while self.get(&id).is_some() || ProviderKind::ALL.iter().any(|p| p.default_profile_id() == id) {
+        while self.get(&id).is_some() || self.app_ids().iter().any(|p| p.default_profile_id() == id) {
             id = format!("{base}-{n}");
             n += 1;
         }
@@ -281,13 +364,53 @@ mod tests {
     fn unique_ids() {
         let mut c = Config::default();
         c.ensure_defaults();
-        assert_eq!(c.unique_id("工作", ProviderKind::Claude), "claude-profile");
+        assert_eq!(c.unique_id("工作", &ProviderKind::Claude.into()), "claude-profile");
         let mut p = Profile::default_for(ProviderKind::Claude);
         p.id = "work".into();
         p.isolated = true;
         c.profiles.push(p);
-        assert_eq!(c.unique_id("Work", ProviderKind::Claude), "work-2");
-        assert_eq!(c.unique_id("claude default", ProviderKind::Claude), "claude-default-2");
+        assert_eq!(c.unique_id("Work", &ProviderKind::Claude.into()), "work-2");
+        assert_eq!(c.unique_id("claude default", &ProviderKind::Claude.into()), "claude-default-2");
+    }
+
+    fn custom(id: &str, name: &str) -> CustomApp {
+        CustomApp {
+            id: id.into(),
+            name: name.into(),
+            program: "/opt/Obsidian/obsidian".into(),
+            base_args: vec![],
+            engine: "electron".into(),
+            icon: None,
+            desktop_file: None,
+            added_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn added_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under(dir.path());
+        let mut c = Config::load(&paths).unwrap();
+        // Never a built-in app's name or alias.
+        assert_eq!(c.unique_app_id("Codex"), "codex-2");
+        assert_eq!(c.unique_app_id("我的应用"), "app");
+        c.apps.push(custom("obsidian", "Obsidian"));
+        c.ensure_defaults();
+        assert_eq!(c.unique_app_id("Obsidian"), "obsidian-2");
+        let d = c.get("obsidian-default").unwrap();
+        assert_eq!(d.provider, AppId::Custom("obsidian".into()));
+        assert!(!d.isolated);
+        assert_eq!(c.app_name(&d.provider), "Obsidian");
+        assert_eq!(c.unique_id("obsidian default", &d.provider.clone()), "obsidian-default-2");
+        c.save(&paths).unwrap();
+        let text = std::fs::read_to_string(paths.config_file()).unwrap();
+        assert!(text.contains("schema = 2") && text.contains("[[app]]") && text.contains("provider = \"obsidian\""));
+        assert_eq!(Config::load(&paths).unwrap(), c);
+        // Without added apps the file stays readable by older versions.
+        c.apps.clear();
+        c.profiles.retain(|p| p.id != "obsidian-default");
+        c.save(&paths).unwrap();
+        assert!(std::fs::read_to_string(paths.config_file()).unwrap().contains("schema = 1"));
     }
 
     #[test]

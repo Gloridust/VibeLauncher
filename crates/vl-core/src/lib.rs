@@ -2,6 +2,7 @@
 //! and diagnostics. The GUI and the CLI are thin layers over [`Launcher`].
 
 pub mod desktop_entry;
+pub mod detect;
 pub mod doctor;
 pub mod icon;
 pub mod install;
@@ -15,7 +16,7 @@ pub mod scheme;
 pub mod shortcuts;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -23,9 +24,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 pub use install::AppInstall;
-pub use model::{Config, Profile, Settings};
+pub use model::{Config, CustomApp, Profile, Settings};
 pub use paths::Paths;
-pub use provider::ProviderKind;
+pub use provider::{AppId, ProviderKind};
 pub use router::{Decision, Reason};
 
 /// What the UI sends to create or edit a profile.
@@ -33,7 +34,7 @@ pub use router::{Decision, Reason};
 #[serde(rename_all = "camelCase")]
 pub struct ProfileInput {
     pub name: String,
-    pub provider: ProviderKind,
+    pub provider: AppId,
     pub color: String,
     #[serde(default)]
     pub icon: Option<String>,
@@ -60,7 +61,7 @@ pub struct RouteResult {
 pub struct Launcher {
     pub paths: Paths,
     pub config: Config,
-    installs: BTreeMap<ProviderKind, Option<AppInstall>>,
+    installs: BTreeMap<AppId, Option<AppInstall>>,
 }
 
 impl Launcher {
@@ -85,13 +86,19 @@ impl Launcher {
 
     // ── apps ──
 
-    pub fn install(&mut self, provider: ProviderKind) -> Option<AppInstall> {
-        if let Some(i) = self.installs.get(&provider) {
+    pub fn install(&mut self, app: impl Into<AppId>) -> Option<AppInstall> {
+        let app = app.into();
+        if let Some(i) = self.installs.get(&app) {
             return i.clone();
         }
-        let over = self.config.settings.app_overrides.get(provider.id()).cloned();
-        let found = install::find_install(provider, over.as_deref());
-        self.installs.insert(provider, found.clone());
+        let found = match &app {
+            AppId::Builtin(p) => {
+                let over = self.config.settings.app_overrides.get(p.id()).cloned();
+                install::find_install(*p, over.as_deref())
+            }
+            AppId::Custom(id) => self.config.custom_app(id).and_then(install::custom_install),
+        };
+        self.installs.insert(app, found.clone());
         found
     }
 
@@ -106,7 +113,7 @@ impl Launcher {
     }
 
     pub fn all_installs(&mut self) -> Vec<AppInstall> {
-        ProviderKind::ALL.iter().filter_map(|p| self.install(*p)).collect()
+        self.config.app_ids().into_iter().filter_map(|a| self.install(a)).collect()
     }
 
     pub fn set_app_override(&mut self, provider: ProviderKind, path: Option<PathBuf>) -> Result<()> {
@@ -122,7 +129,80 @@ impl Launcher {
             }
         }
         self.save()?;
-        self.installs.remove(&provider);
+        self.installs.remove(&provider.into());
+        Ok(())
+    }
+
+    /// Check an app the user picked: whether it can run separate profiles,
+    /// and that it isn't one of the built-in apps.
+    pub fn inspect_app(&mut self, path: &Path) -> std::result::Result<detect::Detected, detect::Refusal> {
+        let d = detect::detect(path)?;
+        let program = d.program.canonicalize().unwrap_or_else(|_| d.program.clone());
+        for p in ProviderKind::ALL {
+            if let Some(i) = self.install(p) {
+                let mut own = i.match_exes.clone();
+                own.extend(i.bundle.clone());
+                if own.iter().any(|e| e.canonicalize().unwrap_or_else(|_| e.clone()) == program) {
+                    return Err(detect::Refusal::BuiltIn);
+                }
+            }
+        }
+        Ok(d)
+    }
+
+    /// Add an app checked with [`Launcher::inspect_app`] and return its id;
+    /// one that was added before keeps its id.
+    pub fn add_app(&mut self, mut d: detect::Detected) -> Result<String> {
+        d.program = std::path::absolute(&d.program)?;
+        let program = d.program.canonicalize().unwrap_or_else(|_| d.program.clone());
+        if let Some(a) = self.config.apps.iter().find(|a| a.program.canonicalize().unwrap_or_else(|_| a.program.clone()) == program) {
+            return Ok(a.id.clone());
+        }
+        let id = self.config.unique_app_id(&d.name);
+        let icon = match d.icon_png {
+            Some(png) => {
+                let f = self.paths.icons_dir().join(format!("app-{id}.png"));
+                std::fs::create_dir_all(self.paths.icons_dir())?;
+                paths::write_atomic(&f, &png)?;
+                Some(f)
+            }
+            None => d.icon,
+        };
+        self.config.apps.push(CustomApp {
+            id: id.clone(),
+            name: d.name.trim().to_string(),
+            program: d.program,
+            base_args: d.base_args,
+            engine: d.engine.as_str().into(),
+            icon,
+            desktop_file: d.desktop_file,
+            added_at: Utc::now(),
+        });
+        self.config.ensure_defaults();
+        self.save()?;
+        self.installs.remove(&AppId::Custom(id.clone()));
+        Ok(id)
+    }
+
+    /// Remove an added app. Its other profiles must be deleted first; its
+    /// default profile goes with it.
+    pub fn remove_app(&mut self, id: &str) -> Result<()> {
+        if self.config.custom_app(id).is_none() {
+            bail!("no added app {id:?}");
+        }
+        let app = AppId::Custom(id.into());
+        let name = self.config.app_name(&app);
+        if self.config.profiles.iter().any(|p| p.provider == app && p.isolated) {
+            bail!("delete {name}'s profiles first");
+        }
+        for p in self.config.profiles.iter().filter(|p| p.provider == app) {
+            let _ = shortcuts::remove(p, &name);
+        }
+        self.config.profiles.retain(|p| p.provider != app);
+        self.config.apps.retain(|a| a.id != id);
+        self.save()?;
+        self.installs.remove(&app);
+        let _ = std::fs::remove_file(self.paths.icons_dir().join(format!("app-{id}.png")));
         Ok(())
     }
 
@@ -139,9 +219,13 @@ impl Launcher {
 
     pub fn launch_spec(&mut self, id: &str, url: Option<&str>) -> Result<provider::LaunchSpec> {
         let p = self.profile(id)?;
-        let inst = self
-            .install(p.provider)
-            .ok_or_else(|| anyhow!("{} isn't installed (or wasn't found). Choose it in Settings.", p.provider.display_name()))?;
+        let Some(inst) = self.install(&p.provider) else {
+            let name = self.config.app_name(&p.provider);
+            return Err(match p.provider {
+                AppId::Builtin(_) => anyhow!("{name} isn't installed (or wasn't found). Choose it in Settings."),
+                AppId::Custom(_) => anyhow!("{name} isn't where it was when you added it. Remove it in Settings and add it again."),
+            });
+        };
         Ok(provider::build_launch_spec(&p, &self.paths, &inst.program, &inst.base_args, inst.bundle.as_deref(), url))
     }
 
@@ -150,7 +234,7 @@ impl Launcher {
         let p = self.profile(id)?;
         let spec = self.launch_spec(&p.id, url)?;
         launch::spawn(&spec)?;
-        let version = self.install(p.provider).and_then(|i| i.version);
+        let version = self.install(&p.provider).and_then(|i| i.version);
         // Another process (the window, a shortcut) may have changed the
         // configuration since we read it; don't write back a stale copy.
         if let Ok(fresh) = Config::load(&self.paths) {
@@ -161,9 +245,11 @@ impl Launcher {
         }
         let _ = self.save();
         if let Some(v) = version {
-            doctor::remember_version(&self.paths, p.provider, &v);
+            doctor::remember_version(&self.paths, &p.provider, &v);
         }
-        self.schedule_reassert(p.provider);
+        if let Some(b) = p.provider.builtin() {
+            self.schedule_reassert(b);
+        }
         Ok(())
     }
 
@@ -171,9 +257,12 @@ impl Launcher {
     /// browser's callback comes back to it.
     pub fn login(&mut self, id: &str) -> Result<()> {
         let p = self.profile(id)?;
-        let store = router::PendingStore::new(&self.paths);
-        store.mark(p.provider, &p.id)?;
-        store.log(&format!("login started for {}", p.id));
+        // Added apps have no sign-in link to route: just open them.
+        if let Some(b) = p.provider.builtin() {
+            let store = router::PendingStore::new(&self.paths);
+            store.mark(b, &p.id)?;
+            store.log(&format!("login started for {}", p.id));
+        }
         self.launch(&p.id, None)
     }
 
@@ -263,7 +352,7 @@ impl Launcher {
     pub fn decide_route(&mut self, provider: ProviderKind, url: &url::Url) -> RouteResult {
         let is_login = provider.is_login_url(url);
         let snap = self.snapshot();
-        let running = snap.running_ids(provider);
+        let running = snap.running_ids(&provider.into());
         let candidates: Vec<router::Candidate> = self
             .config
             .profiles
@@ -283,8 +372,8 @@ impl Launcher {
     /// Hand `url` to profile `id` (starting it if needed).
     pub fn deliver(&mut self, id: &str, url: &str, consume_pending: bool) -> Result<()> {
         let p = self.profile(id)?;
-        if consume_pending {
-            let _ = router::PendingStore::new(&self.paths).consume(p.provider);
+        if let (true, Some(b)) = (consume_pending, p.provider.builtin()) {
+            let _ = router::PendingStore::new(&self.paths).consume(b);
         }
         self.launch(&p.id, Some(url))
     }
@@ -293,8 +382,8 @@ impl Launcher {
     pub fn deliver_choice(&mut self, id: &str, url: &str) -> Result<()> {
         let p = self.profile(id)?;
         let parsed = url::Url::parse(url.trim()).context("not a valid URL")?;
-        if !p.provider.schemes().contains(&parsed.scheme()) {
-            bail!("{} can't open {}:// links", p.provider.display_name(), parsed.scheme());
+        if !p.provider.builtin().is_some_and(|b| b.schemes().contains(&parsed.scheme())) {
+            bail!("{} can't open {}:// links", self.config.app_name(&p.provider), parsed.scheme());
         }
         router::PendingStore::new(&self.paths).log(&format!("{} → {} (chosen by you)", router::redact(url), p.id));
         self.deliver(&p.id, url, true)
@@ -384,7 +473,12 @@ impl Launcher {
     // ── profiles ──
 
     pub fn create_profile(&mut self, input: ProfileInput) -> Result<Profile> {
-        let id = self.config.unique_id(&input.name, input.provider);
+        if let AppId::Custom(app) = &input.provider {
+            if self.config.custom_app(app).is_none() {
+                bail!("no added app {app:?}");
+            }
+        }
+        let id = self.config.unique_id(&input.name, &input.provider);
         let p = Profile {
             id,
             name: input.name.trim().to_string(),
@@ -435,7 +529,7 @@ impl Launcher {
         *self.config.get_mut(&old.id).unwrap() = p.clone();
         self.save()?;
         if old.shortcut && !p.shortcut {
-            let _ = shortcuts::remove(&old);
+            let _ = shortcuts::remove(&old, &self.config.app_name(&old.provider));
         }
         self.after_profile_change(&p);
         Ok(p)
@@ -443,8 +537,8 @@ impl Launcher {
 
     fn after_profile_change(&mut self, p: &Profile) {
         if p.shortcut {
-            let inst = self.install(p.provider);
-            let _ = shortcuts::create(&self.paths, inst.as_ref(), p);
+            let inst = self.install(&p.provider);
+            let _ = shortcuts::create(&self.paths, inst.as_ref(), p, &self.config.app_name(&p.provider));
         }
         let _ = self.apply_routing();
     }
@@ -458,7 +552,7 @@ impl Launcher {
         if self.snapshot().is_running(&p.id) {
             bail!("quit {} first", p.name);
         }
-        let _ = shortcuts::remove(&p);
+        let _ = shortcuts::remove(&p, &self.config.app_name(&p.provider));
         if delete_data {
             let root = p.data_root(&self.paths);
             if root.exists() {
@@ -513,9 +607,10 @@ impl Launcher {
             }
         }
         for p in &self.config.profiles {
-            let path = shortcuts::shortcut_path(p);
+            let app = self.config.app_name(&p.provider);
+            let path = shortcuts::shortcut_path(p, &app);
             if path.exists() {
-                if let Err(e) = shortcuts::remove(p) {
+                if let Err(e) = shortcuts::remove(p, &app) {
                     errs.push(format!("{}: {e:#}", p.name));
                 }
             }
@@ -524,9 +619,9 @@ impl Launcher {
     }
 
     pub fn sync_shortcuts(&mut self) -> Vec<String> {
-        let installs: BTreeMap<ProviderKind, Option<AppInstall>> =
-            ProviderKind::ALL.iter().map(|p| (*p, self.install(*p))).collect();
-        shortcuts::sync(&self.paths, &self.config, &|p| installs.get(&p).cloned().flatten())
+        let installs: BTreeMap<AppId, Option<AppInstall>> =
+            self.config.app_ids().into_iter().map(|a| (a.clone(), self.install(a))).collect();
+        shortcuts::sync(&self.paths, &self.config, &|a| installs.get(a).cloned().flatten())
     }
 
     pub fn data_size(&self, id: &str) -> Option<u64> {

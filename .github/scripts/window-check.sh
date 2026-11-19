@@ -18,7 +18,7 @@ out="$PWD/window-shots"
 mkdir -p "$out"
 T="$( (cygpath -u "$RUNNER_TEMP" 2>/dev/null) || printf %s "$RUNNER_TEMP")/vlui"
 rm -rf "$T"
-mkdir -p "$T/claude" "$T/chatgpt"
+mkdir -p "$T/claude" "$T/chatgpt" "$T/notes/resources"
 win=false
 [ "${RUNNER_OS:-}" = "Windows" ] && win=true
 ext=""
@@ -38,6 +38,10 @@ else
 fi
 cp "$fake" "$claude"
 cp "$fake" "$chatgpt"
+# An app to add with "Other app…": the stand-in, laid out like an Electron app.
+notes="$T/notes/notes$ext"
+cp "$fake" "$notes"
+: > "$T/notes/resources/app.asar"
 
 cfg=$("$cli" list --json | jq -r .config | tr -d '\r')
 $win && cfg=$(cygpath -u "$cfg")
@@ -127,7 +131,8 @@ sed -i.bak -e 's/^language = "zh"/language = "en"/' -e 's/^theme = "dark"/theme 
 report="$out/selftest.txt"
 rm -f "$report"
 # Runs off-screen and exits by itself; a screenshot after every step.
-VL_SELFTEST_OUT="$(native "$report")" VL_SHOT="$(native "$out/steps")" "$gui" > "$out/gui-selftest.log" 2>&1 || true
+VL_SELFTEST_OUT="$(native "$report")" VL_SHOT="$(native "$out/steps")" VL_SELFTEST_PICK="$(native "$notes")" \
+  "$gui" > "$out/gui-selftest.log" 2>&1 || true
 echo "── click-through test ──"
 cat "$report" || { echo "::error::the click-through test didn't run"; exit 1; }
 fail=0
@@ -146,7 +151,14 @@ grep -q 'language = "zh"' "$cfg" && grep -q 'theme = "dark"' "$cfg" \
 grep UISECRET "$T/claude/fake-app-log.jsonl" | grep -q 'ui-test' \
   || { echo "::error::the pasted sign-in link didn't reach the profile"; fail=1; }
 
+# The added app ran with the profile's own folder, and was removed again.
+grep -q 'user-data-dir=.*notes' "$T/notes/fake-app-log.jsonl" \
+  || { echo "::error::the added app's profile didn't start with its own folder"; fail=1; }
+if jq -e '.apps | length > 0' "$out/after.json" >/dev/null; then
+  echo "::error::the app the test added is still there"; fail=1
+fi
+
 # Stop the stand-ins.
-touch "$T/claude/fake-app-stop" "$T/chatgpt/fake-app-stop"
+touch "$T/claude/fake-app-stop" "$T/chatgpt/fake-app-stop" "$T/notes/fake-app-stop"
 ls -la "$out"
 exit $fail

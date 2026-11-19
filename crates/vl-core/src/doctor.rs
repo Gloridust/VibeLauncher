@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::paths::Paths;
-use crate::provider::ProviderKind;
+use crate::provider::{AppId, ProviderKind};
 use crate::{scheme, shortcuts, Launcher};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -72,7 +72,7 @@ fn load_versions(paths: &Paths) -> BTreeMap<String, String> {
 }
 
 /// Remember the app version VibeLauncher last launched, to notice updates.
-pub fn remember_version(paths: &Paths, provider: ProviderKind, v: &str) {
+pub fn remember_version(paths: &Paths, provider: &AppId, v: &str) {
     let mut m = load_versions(paths);
     if m.get(provider.id()).map(String::as_str) != Some(v) {
         m.insert(provider.id().into(), v.into());
@@ -86,27 +86,42 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
     let mut out = Vec::new();
     let snap = l.snapshot();
     let seen = load_versions(&l.paths);
-    for provider in ProviderKind::ALL {
-        let profiles: Vec<crate::Profile> = l.config.profiles.iter().filter(|p| p.provider == provider).cloned().collect();
+    for app in l.config.app_ids() {
+        let builtin = app.builtin();
+        let profiles: Vec<crate::Profile> = l.config.profiles.iter().filter(|p| p.provider == app).cloned().collect();
         let isolated: Vec<&crate::Profile> = profiles.iter().filter(|p| p.isolated).collect();
-        let name = provider.display_name();
-        let inst = l.install(provider);
+        let name_owned = l.config.app_name(&app);
+        let name = name_owned.as_str();
+        let inst = l.install(&app);
 
         // 1. Is the app there?
         match &inst {
-            None if !isolated.is_empty() => out.push(
-                Check::new(
-                    format!("{}-missing", provider.id()),
+            None if builtin.is_none() => {
+                out.push(Check::new(
+                    format!("{}-missing", app.id()),
+                    if isolated.is_empty() { Level::Warning } else { Level::Error },
+                    format!("{name} isn't where it was"),
+                    "It was moved or uninstalled since you added it. Remove it in Settings and add it again.",
+                )
+                .code("added-app-missing", &[("app", name.into())]));
+                continue;
+            }
+            None if !isolated.is_empty() => {
+                let mut c = Check::new(
+                    format!("{}-missing", app.id()),
                     Level::Error,
                     format!("{name} wasn't found"),
                     "Your profiles can't start until VibeLauncher knows where the app is. Install it, or choose it by hand.",
                 )
-                .code("app-missing", &[("app", name.into())])
-                .fix(Fix::ChooseApp { provider }),
-            ),
+                .code("app-missing", &[("app", name.into())]);
+                if let Some(provider) = builtin {
+                    c = c.fix(Fix::ChooseApp { provider });
+                }
+                out.push(c)
+            }
             None => {
                 out.push(Check::new(
-                    format!("{}-missing", provider.id()),
+                    format!("{}-missing", app.id()),
                     Level::Info,
                     format!("{name} isn't installed"),
                     "Nothing to do unless you want to use it.",
@@ -115,7 +130,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 continue;
             }
             Some(i) => out.push(Check::new(
-                format!("{}-found", provider.id()),
+                format!("{}-found", app.id()),
                 Level::Ok,
                 format!("{name} {}", i.version.as_deref().unwrap_or("")).trim().to_string(),
                 format!("{} ({})", i.bundle.as_ref().unwrap_or(&i.program).display(), i.source),
@@ -131,7 +146,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         }
 
         // 2. Login links reach VibeLauncher?
-        if l.routing_wanted(provider) {
+        if let Some(provider) = builtin.filter(|b| l.routing_wanted(*b)) {
             let st = scheme::status(provider, inst.as_ref(), &l.paths);
             let scheme_name = provider.schemes()[0];
             let id = format!("{}-routing", provider.id());
@@ -185,7 +200,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         let mut lost: Vec<String> = Vec::new();
         for p in &isolated {
             let root = p.data_root(&l.paths);
-            let expected = provider.isolation_env(&root);
+            let expected = app.isolation_env(&root);
             for app in snap.for_profile(&p.id) {
                 let Some(env) = &app.environ else { continue };
                 let bad = expected.iter().find(|(k, v)| env.get(k).map(String::as_str) != Some(v.as_str()));
@@ -198,9 +213,9 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                             format!("{}-env", p.id),
                             Level::Warning,
                             format!("“{}” is running without its own {k}", p.name),
-                            match provider {
-                                ProviderKind::Claude => "Usually after an update restarted the app by itself. Its Code tab now reads the shared ~/.claude settings. Restart the profile to fix it.",
-                                ProviderKind::ChatGpt => "Usually after an update restarted the app by itself. It now reads the shared ~/.codex data. Restart the profile to fix it.",
+                            match builtin {
+                                Some(ProviderKind::Claude) => "Usually after an update restarted the app by itself. Its Code tab now reads the shared ~/.claude settings. Restart the profile to fix it.",
+                                _ => "Usually after an update restarted the app by itself. It now reads the shared ~/.codex data. Restart the profile to fix it.",
                             },
                         )
                         .code("lost-env", &[("name", p.name.clone()), ("var", k.clone()), ("app", name.into())])
@@ -209,34 +224,34 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 }
             }
         }
-        for app in snap.apps.iter().filter(|a| a.provider == provider && a.profile_id.is_none()) {
+        for running in snap.apps.iter().filter(|a| a.provider == app && a.profile_id.is_none()) {
             out.push(Check::new(
-                format!("{}-unknown-{}", provider.id(), app.pid),
+                format!("{}-unknown-{}", app.id(), running.pid),
                 Level::Info,
                 format!("A {name} window isn't from any profile"),
-                format!("Process {} uses {}.", app.pid, app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+                format!("Process {} uses {}.", running.pid, running.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
             )
             .code(
                 "unknown-instance",
                 &[
                     ("app", name.into()),
-                    ("pid", app.pid.to_string()),
-                    ("dir", app.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
+                    ("pid", running.pid.to_string()),
+                    ("dir", running.user_data_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_default()),
                 ],
             ));
         }
 
         // 4. Updated since the last launch from VibeLauncher.
-        if let (Some(v), Some(old)) = (inst.as_ref().and_then(|i| i.version.clone()), seen.get(provider.id())) {
+        if let (Some(v), Some(old)) = (inst.as_ref().and_then(|i| i.version.clone()), seen.get(app.id())) {
             if &v != old && !isolated.is_empty() {
-                let default_running = snap.is_running(provider.default_profile_id());
+                let default_running = snap.is_running(&app.default_profile_id());
                 let restart: Vec<String> = isolated
                     .iter()
                     .filter(|p| p.last_launched_at.is_some_and(|t| chrono::Utc::now() - t < chrono::Duration::days(7)))
                     .map(|p| p.id.clone())
                     .collect();
                 let mut c = Check::new(
-                    format!("{}-updated", provider.id()),
+                    format!("{}-updated", app.id()),
                     Level::Info,
                     format!("{name} was updated ({old} → {v})"),
                     if default_running {
@@ -275,7 +290,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         if together.len() >= 2 && lost.is_empty() {
             out.push(
                 Check::new(
-                    format!("{}-simultaneous", provider.id()),
+                    format!("{}-simultaneous", app.id()),
                     Level::Info,
                     format!("{} {name} profiles started at the same moment", together.len()),
                     "Instances that start together tend to update and restart together, which is when profiles get mixed up. Restarting them a few seconds apart avoids that.",
@@ -285,8 +300,29 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
             );
         }
 
-        // 6. Known limitation.
-        if provider == ProviderKind::Claude && !isolated.is_empty() {
+        // 6. An added app may keep its data where it likes, whatever folder
+        //    it's given: then the folder stays empty after it ran.
+        if builtin.is_none() {
+            for p in &isolated {
+                let dir = crate::provider::electron_dir(&p.data_root(&l.paths));
+                let ran = p.last_launched_at.is_some_and(|t| chrono::Utc::now() - t > chrono::Duration::seconds(20));
+                let empty = std::fs::read_dir(&dir).map(|mut rd| rd.next().is_none()).unwrap_or(true);
+                if ran && empty {
+                    out.push(
+                        Check::new(
+                            format!("{}-not-isolated", p.id),
+                            Level::Warning,
+                            format!("“{}” may not be separate", p.name),
+                            format!("{name} wrote nothing to this profile's folder ({}) after it was opened. Either it didn't start, or it keeps its data in a place of its own, and then this profile shares the account of the usual {name} window.", dir.display()),
+                        )
+                        .code("not-isolated", &[("name", p.name.clone()), ("app", name.into()), ("dir", dir.display().to_string())]),
+                    );
+                }
+            }
+        }
+
+        // 7. Known limitation.
+        if app == ProviderKind::Claude && !isolated.is_empty() {
             out.push(Check::new(
                 "claude-cowork",
                 Level::Info,
@@ -297,14 +333,14 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         }
     }
 
-    // 7. Shortcuts.
+    // 8. Shortcuts.
     let broken: Vec<String> = l
         .config
         .profiles
         .iter()
         .filter(|p| p.shortcut)
         .filter(|p| {
-            let s = shortcuts::state(p);
+            let s = shortcuts::state(p, &l.config.app_name(&p.provider));
             !s.exists || s.stale
         })
         .map(|p| p.name.clone())
@@ -322,7 +358,7 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
         );
     }
 
-    // 8. Data folders.
+    // 9. Data folders.
     for p in l.config.profiles.iter().filter(|p| p.isolated) {
         let root = p.data_root(&l.paths);
         if root.exists() && !root.is_dir() {
@@ -360,5 +396,44 @@ pub fn apply(l: &mut Launcher, fix: &Fix) -> Result<()> {
             l.restart_staggered(profiles, stagger)
         }
         Fix::ChooseApp { .. } => anyhow::bail!("choose the app in Settings"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An added app's profile whose folder stayed empty after it ran is
+    /// reported; once the app has written there, it isn't.
+    #[test]
+    fn notices_an_added_app_ignoring_its_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let app_dir = t.path().join("Notely");
+        std::fs::create_dir_all(app_dir.join("resources")).unwrap();
+        std::fs::write(app_dir.join("resources/app.asar"), b"").unwrap();
+        std::fs::write(app_dir.join("notely"), b"").unwrap();
+        let mut l = Launcher::with_paths(Paths::under(&t.path().join("home"))).unwrap();
+        let d = crate::detect::detect(&app_dir.join("notely")).unwrap();
+        let app = AppId::Custom(l.add_app(d).unwrap());
+        let input = crate::ProfileInput {
+            name: "Work".into(),
+            provider: app,
+            color: "#123456".into(),
+            icon: None,
+            data_root: None,
+            env: Default::default(),
+            extra_args: vec![],
+            shortcut: false,
+        };
+        let p = l.create_profile(input).unwrap();
+        let flagged = |l: &mut Launcher| run(l).iter().any(|c| c.code == "not-isolated");
+        // Not opened yet: nothing to say.
+        assert!(!flagged(&mut l));
+        l.config.get_mut(&p.id).unwrap().last_launched_at = Some(chrono::Utc::now() - chrono::Duration::minutes(2));
+        let dir = crate::provider::electron_dir(&p.data_root(&l.paths));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(flagged(&mut l));
+        std::fs::write(dir.join("Local State"), b"{}").unwrap();
+        assert!(!flagged(&mut l));
     }
 }

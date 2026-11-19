@@ -26,6 +26,10 @@ export struct ProfileView {
     color: color,
     icon: image,
     isolated: bool,
+    /// A built-in app's isolated profile: its sign-in link can be routed.
+    can-sign-in: bool,
+    /// The app was added by the user.
+    custom: bool,
     running: bool,
     lost: bool,
     pending: bool,
@@ -57,6 +61,9 @@ export struct AppRow {
     route-on: bool,
     route-supported: bool,
     route-experimental: bool,
+    /// Added by the user (no link routing; can be removed).
+    custom: bool,
+    engine: string,
 }
 
 export struct CheckRow {
@@ -153,6 +160,10 @@ export global App {
     in-out property <string> ps-args;
     in property <string> ps-error;
     in property <bool> ps-saving;
+    // What checking an app picked with "Other app…" found.
+    in property <string> ps-app-note;
+    in property <bool> ps-app-note-warn;
+    in property <bool> ps-app-checking;
 
     in property <string> del-title;
     in property <string> del-sub;
@@ -205,6 +216,8 @@ export global App {
     callback set-theme(string);
     callback find-apps();
     callback choose-app(string);
+    callback add-app();
+    callback remove-app(string);
     callback reset-app(string);
     callback set-route(string, bool);
     callback set-stagger(int);
@@ -219,6 +232,7 @@ export global App {
     callback sheet-close();
     callback ps-name-edited(string);
     callback ps-choose-provider(string);
+    callback ps-other-app();
     callback ps-choose-color(color);
     callback ps-pick-folder();
     callback ps-save();

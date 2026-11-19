@@ -14,13 +14,13 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, Update
 use crate::install::AppInstall;
 use crate::model::Config;
 use crate::paths::Paths;
-use crate::provider::{profile_user_data_dir, ProviderKind};
+use crate::provider::{profile_user_data_dir, AppId, ProviderKind};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningApp {
     pub pid: u32,
-    pub provider: ProviderKind,
+    pub provider: AppId,
     /// `None` when the user-data-dir doesn't belong to any profile.
     pub profile_id: Option<String>,
     pub user_data_dir: Option<PathBuf>,
@@ -111,7 +111,15 @@ impl Snapshot {
                 continue; // Chromium helper (renderer, GPU, zygote, …)
             }
             let exe = p.exe().map(Path::to_path_buf);
-            let Some(provider) = classify(exe.as_deref(), &info.cmd, installs) else { continue };
+            let udd = user_data_dir_arg(&info.cmd);
+            // A profile's own folder also tells the app, when the program
+            // isn't recognised (an AppImage runs from a temporary mount).
+            let owner = udd
+                .as_ref()
+                .and_then(|dir| cfg.profiles.iter().find(|pr| profile_user_data_dir(pr, paths).is_some_and(|d| same(&d, dir))));
+            let Some(provider) = classify(exe.as_deref(), &info.cmd, installs).or_else(|| owner.map(|o| o.provider.clone())) else {
+                continue;
+            };
             // A helper re-executing the main binary without --type= (rare)
             // has a parent of the same app; skip it.
             if let Some(parent) = info.parent.and_then(|pp| sys.process(sysinfo::Pid::from_u32(pp))) {
@@ -119,7 +127,6 @@ impl Snapshot {
                     continue;
                 }
             }
-            let udd = user_data_dir_arg(&info.cmd);
             let profile_id = match &udd {
                 Some(dir) => cfg
                     .profiles
@@ -166,11 +173,11 @@ impl Snapshot {
         self.apps.iter().any(|a| a.profile_id.as_deref() == Some(id))
     }
 
-    pub fn running_ids(&self, provider: ProviderKind) -> Vec<String> {
+    pub fn running_ids(&self, provider: &AppId) -> Vec<String> {
         let mut v: Vec<String> = self
             .apps
             .iter()
-            .filter(|a| a.provider == provider)
+            .filter(|a| a.provider == *provider)
             .filter_map(|a| a.profile_id.clone())
             .collect();
         v.dedup();
@@ -206,12 +213,12 @@ fn debug_dump(sys: &System, installs: &[AppInstall]) {
     }
 }
 
-fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Option<ProviderKind> {
+fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Option<AppId> {
     let exe_c = exe.and_then(|e| e.canonicalize().ok()).or_else(|| exe.map(Path::to_path_buf));
     for i in installs {
         if let Some(e) = &exe_c {
             if i.match_exes.iter().any(|m| same(m, e)) {
-                return Some(i.provider);
+                return Some(i.provider.clone());
             }
         }
     }
@@ -231,7 +238,7 @@ fn classify(exe: Option<&Path>, cmd: &[String], installs: &[AppInstall]) -> Opti
                 .and_then(|e| e.parent())
                 .is_some_and(|d| d.join("resources").is_dir() || d.ends_with("MacOS"));
             if looks_electron {
-                return Some(p);
+                return Some(p.into());
             }
         }
     }

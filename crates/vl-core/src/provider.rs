@@ -1,4 +1,9 @@
 //! What each supported desktop app needs to run an isolated profile.
+//!
+//! [`ProviderKind`] is one of the built-in apps (Claude, ChatGPT), which
+//! VibeLauncher finds by itself and whose sign-in links it can route. An
+//! [`AppId`] names any app a profile can belong to: a built-in one, or an
+//! Electron or Chromium app the user added (see [`crate::detect`]).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -158,14 +163,7 @@ impl ProviderKind {
     /// Environment variables that must not leak from VibeLauncher's own
     /// environment into the app (they change how Electron or the app starts).
     pub fn scrub_env(self, isolated: bool) -> Vec<&'static str> {
-        let mut v = vec![
-            "ELECTRON_RUN_AS_NODE",
-            "ELECTRON_NO_ATTACH_CONSOLE",
-            "ELECTRON_ENABLE_LOGGING",
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "CLAUDE_CODE_SSE_PORT",
-        ];
+        let mut v = SCRUB_ALWAYS.to_vec();
         if isolated {
             match self {
                 Self::Claude => v.extend(["CLAUDE_USER_DATA_DIR", "CLAUDE_CONFIG_DIR"]),
@@ -178,6 +176,125 @@ impl ProviderKind {
     pub fn is_login_url(self, url: &url::Url) -> bool {
         let hay = format!("{}{}", url.host_str().unwrap_or(""), url.path()).to_ascii_lowercase();
         ["login", "auth", "callback", "oauth", "magic", "sso", "verify"].iter().any(|k| hay.contains(k))
+    }
+}
+
+/// Variables never passed on to any app: they change how Electron starts, or
+/// make it think it runs inside Claude Code.
+const SCRUB_ALWAYS: [&str; 6] = [
+    "ELECTRON_RUN_AS_NODE",
+    "ELECTRON_NO_ATTACH_CONSOLE",
+    "ELECTRON_ENABLE_LOGGING",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SSE_PORT",
+];
+
+/// The app a profile belongs to: a built-in one, or one the user added
+/// (`[[app]]` in the config), by its id. Written as the id alone
+/// (`provider = "claude"`, `provider = "obsidian"`), so configurations
+/// without added apps read the same as before.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum AppId {
+    Builtin(ProviderKind),
+    Custom(String),
+}
+
+impl AppId {
+    /// A built-in app's name (and its aliases) or else an added app's id.
+    pub fn parse(s: &str) -> Self {
+        ProviderKind::parse(s).map(Self::Builtin).unwrap_or_else(|| Self::Custom(s.to_string()))
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Builtin(p) => p.id(),
+            Self::Custom(id) => id,
+        }
+    }
+
+    pub fn builtin(&self) -> Option<ProviderKind> {
+        match self {
+            Self::Builtin(p) => Some(*p),
+            Self::Custom(_) => None,
+        }
+    }
+
+    /// The profile that runs the app as installed, without isolation.
+    pub fn default_profile_id(&self) -> String {
+        match self {
+            Self::Builtin(p) => p.default_profile_id().into(),
+            Self::Custom(id) => format!("{id}-default"),
+        }
+    }
+
+    /// The color behind the icon when the app's own icon isn't found.
+    pub fn brand_color(&self) -> &'static str {
+        match self {
+            Self::Builtin(p) => p.brand_color(),
+            Self::Custom(_) => "#7A7F8C",
+        }
+    }
+
+    /// Variables an isolated profile sets. An added app only gets its own
+    /// `--user-data-dir`.
+    pub fn isolation_env(&self, root: &Path) -> Vec<(String, String)> {
+        self.builtin().map(|p| p.isolation_env(root)).unwrap_or_default()
+    }
+
+    pub fn isolation_dirs(&self, root: &Path) -> Vec<PathBuf> {
+        match self {
+            Self::Builtin(p) => p.isolation_dirs(root),
+            Self::Custom(_) => vec![electron_dir(root)],
+        }
+    }
+
+    pub fn scrub_env(&self, isolated: bool) -> Vec<&'static str> {
+        match self {
+            Self::Builtin(p) => p.scrub_env(isolated),
+            Self::Custom(_) => SCRUB_ALWAYS.to_vec(),
+        }
+    }
+
+    pub fn linux_known_binaries(&self) -> &'static [&'static str] {
+        self.builtin().map(ProviderKind::linux_known_binaries).unwrap_or(&[])
+    }
+}
+
+impl From<ProviderKind> for AppId {
+    fn from(p: ProviderKind) -> Self {
+        Self::Builtin(p)
+    }
+}
+
+impl From<&AppId> for AppId {
+    fn from(a: &AppId) -> Self {
+        a.clone()
+    }
+}
+
+impl PartialEq<ProviderKind> for AppId {
+    fn eq(&self, other: &ProviderKind) -> bool {
+        *self == Self::Builtin(*other)
+    }
+}
+
+impl std::fmt::Display for AppId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.id())
+    }
+}
+
+impl Serialize for AppId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.id())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(Self::parse(&s))
     }
 }
 
@@ -215,7 +332,7 @@ pub fn build_launch_spec(
     bundle: Option<&Path>,
     url: Option<&str>,
 ) -> LaunchSpec {
-    let provider = profile.provider;
+    let provider = &profile.provider;
     // e.g. `flatpak run com.example.App`: these come before the app's own flags.
     let mut args: Vec<OsString> = base_args.iter().map(OsString::from).collect();
     let mut set_env = Vec::new();

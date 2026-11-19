@@ -151,6 +151,8 @@ pub fn run(dir: PathBuf) -> std::process::ExitCode {
 const NAME: &str = "UI Test";
 const RENAMED: &str = "UI Test Renamed";
 const LINK: &str = "claude://login/callback?code=UISECRET";
+/// The profile made for the app added with "Other app…" (`VL_SELFTEST_PICK`).
+const ADDED: &str = "Notes Work";
 
 struct T<'a> {
     ui: &'a AppWindow,
@@ -260,6 +262,46 @@ fn step(t: &T, name: &str) -> Result<(), String> {
             g.invoke_del_confirm_clicked();
             t.wait("it to be gone", 30_000, |g| t.side_id(RENAMED).is_none() && g.get_sheet() == "")
         }
+        // Needs an Electron-looking stand-in in VL_SELFTEST_PICK (window-check.sh).
+        "add another app" | "open its profile" | "remove the app" if std::env::var_os("VL_SELFTEST_PICK").is_none() => Ok(()),
+        "add another app" => {
+            g.invoke_new_profile("".into());
+            t.wait("the new-profile sheet", 5_000, |g| g.get_sheet() == "new")?;
+            g.set_ps_name(ADDED.into());
+            g.invoke_ps_name_edited(ADDED.into());
+            g.invoke_ps_other_app();
+            t.wait("the app to be checked", 30_000, |g| !g.get_ps_app_checking() && (g.get_ps_provider() == "+new" || g.get_ps_app_note_warn()))?;
+            if g.get_ps_app_note_warn() {
+                return Err(format!("the app was turned away: {}", g.get_ps_app_note()));
+            }
+            g.invoke_ps_save();
+            t.wait("its profile in the sidebar", 20_000, |_| t.side_id(ADDED).is_some())?;
+            t.wait("its profile to be shown", 20_000, |_| t.shown() == ADDED)
+        }
+        "open its profile" => {
+            if g.get_profile().can_sign_in {
+                return Err("an added app's profile offers to route sign-in links".into());
+            }
+            g.invoke_launch(g.get_profile().id);
+            t.wait("it to be running", 20_000, |g| g.get_profile().running)?;
+            g.invoke_quit(g.get_profile().id);
+            t.wait("it to stop", 30_000, |g| !g.get_profile().running)
+        }
+        "remove the app" => {
+            let id = t.side_id(ADDED).ok_or("the added app's profile isn't in the sidebar")?;
+            g.invoke_delete(id.into());
+            t.wait("the delete sheet", 5_000, |g| g.get_sheet() == "delete")?;
+            g.invoke_del_confirm_clicked();
+            t.wait("the profile to be gone", 30_000, |g| t.side_id(ADDED).is_none() && g.get_sheet() == "")?;
+            g.invoke_select("settings".into(), "".into());
+            let custom = |g: &App| {
+                let apps = g.get_apps();
+                (0..slint::Model::row_count(&apps)).filter_map(|i| slint::Model::row_data(&apps, i)).find(|a| a.custom).map(|a| a.provider.to_string())
+            };
+            t.wait("the app in Settings", 10_000, |g| custom(g).is_some())?;
+            g.invoke_remove_app(custom(&g).unwrap_or_default().into());
+            t.wait("the app to be removed", 20_000, |g| custom(g).is_none())
+        }
         _ => Err(format!("unknown step {name}")),
     }
 }
@@ -300,6 +342,9 @@ pub fn click_through(out: PathBuf) -> std::process::ExitCode {
         "settings show updates",
         "switch to Chinese and dark",
         "delete it",
+        "add another app",
+        "open its profile",
+        "remove the app",
     ];
     for (i, name) in steps.iter().enumerate() {
         let r = step(&t, name);

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel};
 use vl_core::doctor::{self, Check, Fix, Level};
-use vl_core::{icon, router, scheme, shortcuts, AppInstall, Decision, Launcher, Profile, ProfileInput, ProviderKind, Settings};
+use vl_core::{detect, icon, router, scheme, shortcuts, AppId, AppInstall, Decision, Launcher, Profile, ProfileInput, ProviderKind, Settings};
 
 use crate::i18n::{self, t, tf};
 use crate::{update, App, AppRow, AppWindow, CheckRow, ChoiceRow, ProfileView, SegOption, SideRow, Theme, ToastItem, Tr};
@@ -24,6 +24,9 @@ type Pixels = SharedPixelBuffer<Rgba8Pixel>;
 const POLL: Duration = Duration::from_millis(2500);
 const DOCTOR_EVERY: Duration = Duration::from_secs(30);
 const LOGIN_SECS: i64 = 300;
+/// The app being added from the new-profile sheet ("Other app…"), until
+/// the profile is created; never a valid app id.
+const NEW_APP: &str = "+new";
 pub const COLORS: [&str; 10] = ["#D97757", "#E5484D", "#F59E0B", "#2F9E62", "#14B8A6", "#3B82F6", "#6E7BF2", "#A855F7", "#EC4899", "#78716C"];
 
 // ───────────────────────── what the worker reads ─────────────────────────
@@ -39,11 +42,14 @@ struct PSnap {
 }
 
 struct ASnap {
-    provider: ProviderKind,
-    name: &'static str,
+    provider: AppId,
+    name: String,
+    /// An added app's engine ("electron" or "chromium").
+    engine: Option<String>,
     install: Option<AppInstall>,
     icon: Option<Pixels>,
-    routing: scheme::SchemeStatus,
+    /// A built-in app's link routing.
+    routing: Option<scheme::SchemeStatus>,
     routing_wanted: bool,
     /// The profile waiting for a sign-in link, and seconds left.
     pending: Option<(String, i64)>,
@@ -59,8 +65,9 @@ pub struct Snap {
 }
 
 impl Snap {
-    fn app(&self, p: ProviderKind) -> &ASnap {
-        self.apps.iter().find(|a| a.provider == p).expect("every provider")
+    /// Every profile's app is here (profiles of an unknown app aren't).
+    fn app(&self, p: &AppId) -> &ASnap {
+        self.apps.iter().find(|a| a.provider == *p).expect("every app")
     }
     fn profile(&self, id: &str) -> Option<&PSnap> {
         self.profiles.iter().find(|p| p.p.id == id)
@@ -68,11 +75,10 @@ impl Snap {
     /// Profiles shown in the sidebar: an app's group is hidden when the app
     /// isn't installed and has no separate profiles.
     fn visible(&self) -> Vec<&PSnap> {
-        ProviderKind::ALL
+        self.apps
             .iter()
-            .flat_map(|&pv| {
-                let app = self.app(pv);
-                let rows: Vec<&PSnap> = self.profiles.iter().filter(|p| p.p.provider == pv).collect();
+            .flat_map(|app| {
+                let rows: Vec<&PSnap> = self.profiles.iter().filter(|p| p.p.provider == app.provider).collect();
                 if app.install.is_none() && !rows.iter().any(|p| p.p.isolated) {
                     vec![]
                 } else {
@@ -117,22 +123,25 @@ impl Worker {
             let snap = l.snapshot();
             let mut apps = Vec::new();
             let mut installs = HashMap::new();
-            for provider in ProviderKind::ALL {
-                let inst = l.install(provider);
-                installs.insert(provider, inst.clone());
+            let app_ids = l.config.app_ids();
+            for app in &app_ids {
+                let inst = l.install(app);
+                installs.insert(app.clone(), inst.clone());
                 let key = format!("app|{:?}", inst.as_ref().and_then(|i| i.icon.clone()));
                 let app_icon = icons
                     .entry(key)
                     .or_insert_with(|| inst.as_ref().and_then(|i| icon::load_base(i.icon.as_deref()?)).map(|img| to_pixels(img, 64)))
                     .clone();
+                let builtin = app.builtin();
                 apps.push(ASnap {
-                    provider,
-                    name: provider.display_name(),
+                    provider: app.clone(),
+                    name: l.config.app_name(app),
+                    engine: l.config.custom_app(app.id()).filter(|_| builtin.is_none()).map(|a| a.engine.clone()),
                     icon: app_icon,
-                    routing: scheme::status(provider, inst.as_ref(), &l.paths),
-                    routing_wanted: l.routing_wanted(provider),
-                    pending: l
-                        .pending_login(provider)
+                    routing: builtin.map(|b| scheme::status(b, inst.as_ref(), &l.paths)),
+                    routing_wanted: builtin.is_some_and(|b| l.routing_wanted(b)),
+                    pending: builtin
+                        .and_then(|b| l.pending_login(b))
                         .map(|p| (p.profile, (router::PENDING_TTL_SECS - (now_secs() - p.created_at.timestamp())).max(0))),
                     install: inst,
                 });
@@ -141,6 +150,7 @@ impl Worker {
                 .config
                 .profiles
                 .iter()
+                .filter(|p| app_ids.contains(&p.provider))
                 .map(|p| {
                     let root = p.data_root(&l.paths);
                     let running = snap.for_profile(&p.id);
@@ -154,12 +164,13 @@ impl Worker {
                     let inst = installs.get(&p.provider).cloned().flatten();
                     let key = format!("{}|{}|{}|{:?}", p.id, p.color, p.isolated, inst.as_ref().and_then(|i| i.icon.clone()));
                     let icon = icons.entry(key).or_insert_with(|| Some(to_pixels(icon::compose(inst.as_ref(), p), 128))).clone();
+                    let app_name = l.config.app_name(&p.provider);
                     PSnap {
                         data_dir: if p.isolated { root.display().to_string() } else { String::new() },
                         running: !running.is_empty(),
                         lost,
-                        shortcut: shortcuts::state(p),
-                        shortcut_name: shortcuts::display_name(p),
+                        shortcut: shortcuts::state(p, &app_name),
+                        shortcut_name: shortcuts::display_name(&app_name, p),
                         icon,
                         p: p.clone(),
                     }
@@ -226,7 +237,7 @@ enum LoginPhase {
 #[derive(Clone)]
 enum Sheet {
     None,
-    New { provider: ProviderKind },
+    New { provider: AppId },
     Edit { id: String },
     Delete { id: String },
     Login { id: String, phase: LoginPhase, deadline: Instant },
@@ -260,7 +271,12 @@ pub struct Ctl {
     sheet: Sheet,
     checks: Option<Vec<Check>>,
     log: Option<Vec<String>>,
-    collapsed: BTreeSet<ProviderKind>,
+    /// Sidebar groups folded away, by app id.
+    collapsed: BTreeSet<String>,
+    /// What "Other app…" found, until the profile is created.
+    new_app: Option<detect::Detected>,
+    /// Why the app picked with "Other app…" can't be used.
+    app_refusal: Option<detect::Refusal>,
     toasts: Vec<(i32, String, bool)>,
     toast_seq: i32,
     opened_for_route: bool,
@@ -364,7 +380,7 @@ impl Ctl {
             // A sign-in that was waiting is done once its marker is used.
             if let Sheet::Login { id, phase: LoginPhase::Waiting, deadline } = &self.sheet {
                 let started = deadline.checked_duration_since(Instant::now()).is_none_or(|left| left < Duration::from_secs(295));
-                let still = s.profile(id).and_then(|p| s.app(p.p.provider).pending.as_ref()).is_some_and(|(pid, _)| pid == id);
+                let still = s.profile(id).and_then(|p| s.app(&p.p.provider).pending.as_ref()).is_some_and(|(pid, _)| pid == id);
                 if started && !still {
                     let (id, deadline) = (id.clone(), *deadline);
                     self.sheet = Sheet::Login { id, phase: LoginPhase::Done, deadline };
@@ -470,17 +486,17 @@ impl Ctl {
 
         // sidebar
         let mut rows = Vec::new();
-        for pv in ProviderKind::ALL {
-            let app = s.app(pv);
-            let list: Vec<&PSnap> = s.profiles.iter().filter(|p| p.p.provider == pv).collect();
+        for app in &s.apps {
+            let pv = &app.provider;
+            let list: Vec<&PSnap> = s.profiles.iter().filter(|p| p.p.provider == *pv).collect();
             if app.install.is_none() && !list.iter().any(|p| p.p.isolated) {
                 continue;
             }
-            let collapsed = self.collapsed.contains(&pv);
+            let collapsed = self.collapsed.contains(pv.id());
             rows.push(SideRow {
                 header: true,
                 provider: pv.id().into(),
-                label: app.name.into(),
+                label: app.name.as_str().into(),
                 note: if app.install.is_none() { t("nav.notInstalled").into() } else { SharedString::new() },
                 collapsed,
                 ..Default::default()
@@ -531,7 +547,7 @@ impl Ctl {
     }
 
     fn profile_view(&mut self, s: &Snap, p: &PSnap) -> ProfileView {
-        let app = s.app(p.p.provider);
+        let app = s.app(&p.p.provider);
         let order: Vec<&str> = s.profiles.iter().filter(|x| x.p.provider == p.p.provider).map(|x| x.p.id.as_str()).collect();
         let pos = order.iter().position(|x| *x == p.p.id).unwrap_or(0);
         let platform = if cfg!(target_os = "macos") {
@@ -545,11 +561,13 @@ impl Ctl {
             id: p.p.id.as_str().into(),
             name: p.p.name.as_str().into(),
             provider: p.p.provider.id().into(),
-            app_name: app.name.into(),
+            app_name: app.name.as_str().into(),
             app_installed: app.install.is_some(),
             color: color(&p.p.color),
             icon: self.image(&p.icon),
             isolated: p.p.isolated,
+            can_sign_in: p.p.isolated && p.p.provider.builtin().is_some(),
+            custom: p.p.provider.builtin().is_none(),
             running: p.running,
             lost: p.lost,
             pending: app.pending.as_ref().is_some_and(|(id, _)| *id == p.p.id),
@@ -571,9 +589,32 @@ impl Ctl {
     }
 
     fn app_row(&mut self, s: &Snap, a: &ASnap) -> AppRow {
-        let scheme = if a.provider == ProviderKind::Claude { "claude" } else { "codex" };
-        let r = &a.routing;
-        let on = match a.provider {
+        let inst = a.install.as_ref();
+        let mut row = AppRow {
+            provider: a.provider.id().into(),
+            name: a.name.as_str().into(),
+            icon: self.image(&a.icon),
+            installed: inst.is_some(),
+            version: inst.and_then(|i| i.version.clone()).unwrap_or_default().into(),
+            path: inst.map(|i| i.bundle.as_ref().unwrap_or(&i.program).display().to_string()).unwrap_or_default().into(),
+            manual: s.settings.app_overrides.contains_key(a.provider.id()),
+            found: match inst {
+                Some(i) => format!("{}{}", t("onb.found"), i.version.as_ref().map(|v| format!(" · {v}")).unwrap_or_default()),
+                None => t("onb.missing"),
+            }
+            .into(),
+            custom: a.engine.is_some(),
+            engine: match a.engine.as_deref() {
+                Some("chromium") => "Chromium",
+                Some(_) => "Electron",
+                None => "",
+            }
+            .into(),
+            ..Default::default()
+        };
+        let (Some(b), Some(r)) = (a.provider.builtin(), &a.routing) else { return row };
+        let scheme = b.schemes()[0];
+        let on = match b {
             ProviderKind::Claude => s.settings.route_claude,
             ProviderKind::ChatGpt => s.settings.route_chatgpt,
         };
@@ -588,27 +629,13 @@ impl Ctl {
         } else {
             t("settings.routeIdle")
         };
-        let inst = a.install.as_ref();
-        AppRow {
-            provider: a.provider.id().into(),
-            name: a.name.into(),
-            icon: self.image(&a.icon),
-            installed: inst.is_some(),
-            version: inst.and_then(|i| i.version.clone()).unwrap_or_default().into(),
-            path: inst.map(|i| i.bundle.as_ref().unwrap_or(&i.program).display().to_string()).unwrap_or_default().into(),
-            manual: s.settings.app_overrides.contains_key(a.provider.id()),
-            found: match inst {
-                Some(i) => format!("{}{}", t("onb.found"), i.version.as_ref().map(|v| format!(" · {v}")).unwrap_or_default()),
-                None => t("onb.missing"),
-            }
-            .into(),
-            route_title: tf("settings.route", &[("scheme", scheme)]).into(),
-            route_status: r.conflict.clone().unwrap_or(status).into(),
-            route_warn: r.conflict.is_some(),
-            route_on: on && r.supported,
-            route_supported: r.supported,
-            route_experimental: r.experimental && r.supported,
-        }
+        row.route_title = tf("settings.route", &[("scheme", scheme)]).into();
+        row.route_status = r.conflict.clone().unwrap_or(status).into();
+        row.route_warn = r.conflict.is_some();
+        row.route_on = on && r.supported;
+        row.route_supported = r.supported;
+        row.route_experimental = r.experimental && r.supported;
+        row
     }
 
     fn render_checks(&self) {
@@ -731,16 +758,16 @@ impl Ctl {
             .into(),
         );
         match sheet {
-            Sheet::New { provider } => self.render_profile_sheet(s, None, provider),
+            Sheet::New { provider } => self.render_profile_sheet(s, None, &provider),
             Sheet::Edit { id } => {
                 if let Some(p) = s.profile(&id) {
-                    self.render_profile_sheet(s, Some(&p.p), p.p.provider)
+                    self.render_profile_sheet(s, Some(&p.p), &p.p.provider)
                 }
             }
             Sheet::Login { id, phase, deadline } => {
                 let Some(p) = s.profile(&id) else { return };
-                let app = s.app(p.p.provider);
-                let name = app.name;
+                let app = s.app(&p.p.provider);
+                let name = app.name.as_str();
                 g.set_login_title(tf("login.title", &[("name", &p.p.name)]).into());
                 let steps: Vec<SharedString> = ["login.step1", "login.step2", "login.step3"].iter().map(|k| tf(k, &[("app", name)]).into()).collect();
                 g.set_login_steps(ModelRc::new(VecModel::from(steps)));
@@ -757,16 +784,16 @@ impl Ctl {
                 let left = deadline.saturating_duration_since(Instant::now()).as_secs() as i64;
                 g.set_login_wait(tf("login.waiting", &[("time", &format!("{}:{:02}", left / 60, left % 60))]).into());
                 g.set_login_left((left as f32 / LOGIN_SECS as f32).clamp(0.0, 1.0));
-                let routed = app.routing.claimed && !app.routing.stale;
+                let routed = app.routing.as_ref().is_some_and(|r| r.claimed && !r.stale);
                 g.set_login_routing_hint(if routed { String::new() } else { tf("login.routingOff", &[("app", name)]) }.into());
                 g.set_login_paste_body(tf("login.pasteBody", &[("app", name)]).into());
-                let scheme = if p.p.provider == ProviderKind::Claude { "claude" } else { "codex" };
+                let scheme = p.p.provider.builtin().map_or("", |b| b.schemes()[0]);
                 g.set_login_placeholder(tf("login.pastePlaceholder", &[("scheme", scheme)]).into());
             }
             Sheet::Route(req) => {
-                let app = s.app(req.provider);
+                let app = s.app(&req.provider.into());
                 g.set_route_title(if req.is_login { t("route.loginTitle") } else { t("route.title") }.into());
-                g.set_route_sub(tf("route.body", &[("app", app.name), ("link", &req.redacted)]).into());
+                g.set_route_sub(tf("route.body", &[("app", &app.name), ("link", &req.redacted)]).into());
                 let mut cands: Vec<&PSnap> = req.candidates.iter().filter_map(|id| s.profile(id)).collect();
                 cands.sort_by_key(|p| !p.running);
                 let rows: Vec<ChoiceRow> = cands
@@ -791,7 +818,7 @@ impl Ctl {
         }
     }
 
-    fn render_profile_sheet(&mut self, s: &Snap, ed: Option<&Profile>, provider: ProviderKind) {
+    fn render_profile_sheet(&mut self, s: &Snap, ed: Option<&Profile>, provider: &AppId) {
         let win = self.win.clone_strong();
         let g = win.global::<App>();
         let platform = if cfg!(target_os = "macos") {
@@ -805,26 +832,55 @@ impl Ctl {
         g.set_ps_editing(ed.is_some());
         g.set_ps_is_default(is_default);
         g.set_ps_provider(provider.id().into());
-        let opts: Vec<SegOption> = ProviderKind::ALL
+        let mut opts: Vec<SegOption> = s
+            .apps
             .iter()
-            .map(|&pv| {
-                let a = s.app(pv);
-                SegOption {
-                    value: pv.id().into(),
-                    label: a.name.into(),
-                    icon: self.image(&a.icon),
-                    has_icon: a.icon.is_some(),
-                    disabled: ed.is_some() || a.install.is_none(),
-                }
+            .map(|a| SegOption {
+                value: a.provider.id().into(),
+                label: a.name.as_str().into(),
+                icon: self.image(&a.icon),
+                has_icon: a.icon.is_some(),
+                disabled: ed.is_some() || a.install.is_none(),
             })
             .collect();
+        let new_app = self.new_app.as_ref().filter(|_| ed.is_none());
+        if let Some(d) = new_app {
+            let img = d
+                .icon_png
+                .as_deref()
+                .and_then(|b| image::load_from_memory(b).ok())
+                .map(|i| i.to_rgba8())
+                .or_else(|| d.icon.as_deref().and_then(icon::load_base))
+                .map(|img| Image::from_rgba8(to_pixels(img, 32)));
+            opts.push(SegOption {
+                value: NEW_APP.into(),
+                label: d.name.as_str().into(),
+                has_icon: img.is_some(),
+                icon: img.unwrap_or_default(),
+                disabled: false,
+            });
+        }
         g.set_ps_providers(ModelRc::new(VecModel::from(opts)));
+        let (note, warn) = match (provider.id() == NEW_APP, new_app, self.app_refusal) {
+            (_, _, Some(r)) => (t(&format!("appCheck.{}", r.code())), true),
+            (true, Some(d), None) => (
+                tf("appCheck.ok", &[("app", &d.name), ("engine", if d.engine == detect::Engine::Chromium { "Chromium" } else { "Electron" })]),
+                false,
+            ),
+            _ => (String::new(), false),
+        };
+        g.set_ps_app_note(note.into());
+        g.set_ps_app_note_warn(warn);
+        let app_name = match new_app {
+            Some(d) if provider.id() == NEW_APP => d.name.clone(),
+            _ => s.apps.iter().find(|a| a.provider == *provider).map(|a| a.name.clone()).unwrap_or_default(),
+        };
         g.set_ps_colors(ModelRc::new(VecModel::from(COLORS.iter().map(|c| color(c)).collect::<Vec<_>>())));
         let name = g.get_ps_name().to_string();
         let shown = if is_default {
             format!("{} (VibeLauncher)", ed.map_or("", |p| p.name.as_str()))
         } else {
-            format!("{} · {}", s.app(provider).name, if name.trim().is_empty() { "…" } else { name.trim() })
+            format!("{app_name} · {}", if name.trim().is_empty() { "…" } else { name.trim() })
         };
         g.set_ps_shortcut_hint(tf(&format!("detail.shortcutHint.{platform}"), &[("name", &shown)]).into());
         let sep = if cfg!(windows) { "\\" } else { "/" };
@@ -834,12 +890,20 @@ impl Ctl {
 
     // ───────── sheets ─────────
 
-    fn open_profile_sheet(&mut self, ed: Option<String>, provider: Option<ProviderKind>) {
+    fn open_profile_sheet(&mut self, ed: Option<String>, provider: Option<AppId>) {
         let Some(s) = self.snap.clone() else { return };
         let g = self.win.global::<App>();
         let p = ed.as_ref().and_then(|id| s.profile(id)).map(|p| p.p.clone());
-        let installed: Vec<ProviderKind> = ProviderKind::ALL.into_iter().filter(|&pv| s.app(pv).install.is_some()).collect();
-        let provider = p.as_ref().map(|p| p.provider).or(provider).or(installed.first().copied()).unwrap_or(ProviderKind::Claude);
+        let installed = s.apps.iter().find(|a| a.install.is_some()).map(|a| a.provider.clone());
+        let provider = p
+            .as_ref()
+            .map(|p| p.provider.clone())
+            .or(provider.filter(|a| s.apps.iter().any(|x| x.provider == *a)))
+            .or(installed)
+            .unwrap_or(ProviderKind::Claude.into());
+        self.new_app = None;
+        self.app_refusal = None;
+        g.set_ps_app_checking(false);
         let used: BTreeSet<String> = s.profiles.iter().map(|p| p.p.color.to_lowercase()).collect();
         let col = p
             .as_ref()
@@ -880,11 +944,18 @@ impl Ctl {
             }
         };
         let (editing, provider) = match &self.sheet {
-            Sheet::Edit { id } => (Some(id.clone()), self.snap.as_ref().and_then(|s| s.profile(id)).map(|p| p.p.provider)),
-            Sheet::New { provider } => (None, Some(*provider)),
+            Sheet::Edit { id } => (Some(id.clone()), self.snap.as_ref().and_then(|s| s.profile(id)).map(|p| p.p.provider.clone())),
+            Sheet::New { provider } => (None, Some(provider.clone())),
             _ => return,
         };
         let Some(provider) = provider else { return };
+        // A profile for the app picked with "Other app…": add the app with it.
+        let new_app = if provider.id() == NEW_APP {
+            let Some(d) = self.new_app.clone() else { return };
+            Some(d)
+        } else {
+            None
+        };
         let icon = editing.as_ref().and_then(|id| self.snap.as_ref()?.profile(id)).map(|p| p.p.icon.clone());
         let data_root = g.get_ps_data_root().trim().to_string();
         let input = ProfileInput {
@@ -903,7 +974,28 @@ impl Ctl {
             move |w| {
                 w.with(move |l| match &editing {
                     Some(id) => l.update_profile(id, input).map(|p| (p, true)),
-                    None => l.create_profile(input).map(|p| (p, false)),
+                    None => {
+                        let mut input = input;
+                        let mut added = None;
+                        if let Some(d) = new_app {
+                            let before = l.config.apps.len();
+                            let id = l.add_app(d)?;
+                            if l.config.apps.len() > before {
+                                added = Some(id.clone());
+                            }
+                            input.provider = AppId::Custom(id);
+                        }
+                        match l.create_profile(input) {
+                            Ok(p) => Ok((p, false)),
+                            Err(e) => {
+                                // Don't leave an app behind that the user never got a profile for.
+                                if let Some(id) = added {
+                                    let _ = l.remove_app(&id);
+                                }
+                                Err(e)
+                            }
+                        }
+                    }
                 })
             },
             |c, r| {
@@ -991,7 +1083,7 @@ impl Ctl {
         g.set_login_error("".into());
         g.set_login_sending(false);
         // Opened from the "waiting" banner: don't start a second sign-in.
-        if let Some((pid, left)) = &s.app(p.p.provider).pending {
+        if let Some((pid, left)) = &s.app(&p.p.provider).pending {
             if *pid == id {
                 self.sheet = Sheet::Login { id, phase: LoginPhase::Waiting, deadline: Instant::now() + Duration::from_secs(*left as u64) };
                 self.render();
@@ -1038,8 +1130,9 @@ impl Ctl {
                 w.with(|l| {
                     let parsed = url::Url::parse(&link).map_err(|_| anyhow::anyhow!("That isn't a link."))?;
                     let p = l.config.find(&id).cloned().ok_or_else(|| anyhow::anyhow!("no such profile"))?;
-                    if !p.provider.schemes().contains(&parsed.scheme()) {
-                        anyhow::bail!("That isn't a {} link. It should start with {}://", p.provider.display_name(), p.provider.schemes()[0]);
+                    let Some(b) = p.provider.builtin() else { anyhow::bail!("{} has no sign-in links to pass on", l.config.app_name(&p.provider)) };
+                    if !b.schemes().contains(&parsed.scheme()) {
+                        anyhow::bail!("That isn't a {} link. It should start with {}://", b.display_name(), b.schemes()[0]);
                     }
                     router::PendingStore::new(&l.paths).log(&format!("{} → {} (pasted)", router::redact(&link), p.id));
                     l.deliver(&p.id, &link, true)
@@ -1157,6 +1250,73 @@ impl Ctl {
                 }
                 match r {
                     Ok(problems) => problems.into_iter().for_each(|p| c.toast(p, true)),
+                    Err(e) => c.toast(e, true),
+                }
+                c.refresh();
+            },
+        );
+    }
+
+    /// Check the app picked with "Other app…" in the new-profile sheet. One
+    /// that was added before is simply selected.
+    fn check_new_app(&mut self, path: PathBuf) {
+        self.app_refusal = None;
+        self.win.global::<App>().set_ps_app_checking(true);
+        self.render();
+        self.work(
+            move |w| {
+                w.with(move |l| {
+                    Ok(l.inspect_app(&path).map(|d| {
+                        let program = d.program.canonicalize().unwrap_or_else(|_| d.program.clone());
+                        let known = l
+                            .config
+                            .apps
+                            .iter()
+                            .find(|a| a.program.canonicalize().unwrap_or_else(|_| a.program.clone()) == program)
+                            .map(|a| a.id.clone());
+                        (known, d)
+                    }))
+                })
+            },
+            |c, r| {
+                c.win.global::<App>().set_ps_app_checking(false);
+                if !matches!(c.sheet, Sheet::New { .. }) {
+                    return;
+                }
+                match r {
+                    Ok(Ok((Some(id), _))) => c.sheet = Sheet::New { provider: AppId::Custom(id) },
+                    Ok(Ok((None, d))) => {
+                        c.new_app = Some(d);
+                        c.sheet = Sheet::New { provider: AppId::Custom(NEW_APP.into()) };
+                    }
+                    Ok(Err(refusal)) => c.app_refusal = Some(refusal),
+                    Err(e) => c.toast(e, true),
+                }
+                c.render();
+            },
+        );
+    }
+
+    /// Settings → Add app: check and add it without making a profile.
+    fn add_app(&mut self, path: PathBuf) {
+        self.win.global::<App>().set_apps_busy("add".into());
+        self.work(
+            move |w| {
+                w.with(move |l| {
+                    Ok(match l.inspect_app(&path) {
+                        Ok(d) => {
+                            let id = l.add_app(d)?;
+                            Ok(l.config.app_name(&AppId::Custom(id)))
+                        }
+                        Err(r) => Err(r),
+                    })
+                })
+            },
+            |c, r| {
+                c.win.global::<App>().set_apps_busy("".into());
+                match r {
+                    Ok(Ok(name)) => c.toast(tf("app.added", &[("app", &name)]), false),
+                    Ok(Err(refusal)) => c.toast(t(&format!("appCheck.{}", refusal.code())), true),
                     Err(e) => c.toast(e, true),
                 }
                 c.refresh();
@@ -1476,6 +1636,41 @@ fn pick(directory: bool, title: String, done: impl FnOnce(Option<PathBuf>) + Sen
     });
 }
 
+/// Pick an app to add, starting where apps are installed.
+fn pick_app(done: impl FnOnce(PathBuf) + Send + 'static) {
+    // The click-through test can't use a file dialog.
+    #[cfg(feature = "selftest")]
+    if let Some(p) = std::env::var_os("VL_SELFTEST_PICK") {
+        done(PathBuf::from(p));
+        return;
+    }
+    let start = if cfg!(target_os = "macos") {
+        PathBuf::from("/Applications")
+    } else if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs")).unwrap_or_default()
+    } else {
+        PathBuf::from("/usr/share/applications")
+    };
+    let title = t("appCheck.pickTitle");
+    let run = move || {
+        let mut d = rfd::FileDialog::new().set_title(&title);
+        if start.is_dir() {
+            d = d.set_directory(&start);
+        }
+        d.pick_file()
+    };
+    #[cfg(target_os = "macos")]
+    if let Some(p) = run() {
+        done(p);
+    }
+    #[cfg(not(target_os = "macos"))]
+    std::thread::spawn(move || {
+        if let Some(p) = run() {
+            let _ = slint::invoke_from_event_loop(move || done(p));
+        }
+    });
+}
+
 fn copy_text(text: &str) -> bool {
     arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).is_ok()
 }
@@ -1545,6 +1740,8 @@ pub fn install(win: &AppWindow, args: &[String]) {
         checks: None,
         log: None,
         collapsed: BTreeSet::new(),
+        new_app: None,
+        app_refusal: None,
         toasts: Vec::new(),
         toast_seq: 0,
         opened_for_route,
@@ -1649,16 +1846,15 @@ fn wire(win: &AppWindow) {
         });
     });
     g.on_new_profile(|pv| {
-        ctl(|c| c.open_profile_sheet(None, provider(&pv)));
+        ctl(|c| c.open_profile_sheet(None, (!pv.is_empty()).then(|| AppId::parse(&pv))));
     });
     g.on_toggle_section(|pv| {
         ctl(|c| {
-            if let Some(pv) = provider(&pv) {
-                if !c.collapsed.remove(&pv) {
-                    c.collapsed.insert(pv);
-                }
-                c.render();
+            let pv = pv.to_string();
+            if !c.collapsed.remove(&pv) {
+                c.collapsed.insert(pv);
             }
+            c.render();
         });
     });
     g.on_launch(|id| {
@@ -1694,11 +1890,11 @@ fn wire(win: &AppWindow) {
     g.on_cancel_login(|| {
         ctl(|c| {
             let pv = match &c.sheet {
-                Sheet::Login { id, .. } => c.snap.as_ref().and_then(|s| s.profile(id)).map(|p| p.p.provider),
+                Sheet::Login { id, .. } => c.snap.as_ref().and_then(|s| s.profile(id)).and_then(|p| p.p.provider.builtin()),
                 _ => None,
             }
             .or_else(|| match c.current_view() {
-                View::Profile(id) => c.snap.as_ref().and_then(|s| s.profile(&id)).map(|p| p.p.provider),
+                View::Profile(id) => c.snap.as_ref().and_then(|s| s.profile(&id)).and_then(|p| p.p.provider.builtin()),
                 _ => None,
             });
             if let Some(pv) = pv {
@@ -1837,6 +2033,18 @@ fn wire(win: &AppWindow) {
             ctl(|c| c.choose_app(pv));
         }
     });
+    g.on_add_app(|| {
+        pick_app(|path| {
+            ctl(|c| c.add_app(path));
+        });
+    });
+    g.on_remove_app(|id| {
+        let id = id.to_string();
+        ctl(|c| {
+            let name = c.snap.as_ref().and_then(|s| s.apps.iter().find(|a| a.provider.id() == id)).map(|a| a.name.clone()).unwrap_or_default();
+            c.act("", move |l| l.remove_app(&id), Some(tf("app.removed", &[("app", &name)])));
+        });
+    });
     g.on_reset_app(|pv| {
         if let Some(pv) = provider(&pv) {
             ctl(|c| {
@@ -1921,10 +2129,16 @@ fn wire(win: &AppWindow) {
     });
     g.on_ps_choose_provider(|pv| {
         ctl(|c| {
-            if let (Sheet::New { .. }, Some(pv)) = (&c.sheet, provider(&pv)) {
-                c.sheet = Sheet::New { provider: pv };
+            if let Sheet::New { .. } = &c.sheet {
+                c.sheet = Sheet::New { provider: AppId::parse(&pv) };
+                c.app_refusal = None;
                 c.render();
             }
+        });
+    });
+    g.on_ps_other_app(|| {
+        pick_app(|path| {
+            ctl(|c| c.check_new_app(path));
         });
     });
     g.on_ps_choose_color(|col| {

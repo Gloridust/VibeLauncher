@@ -128,7 +128,7 @@ export component ProfilePage inherits Page {
                 busy: App.busy == "quit";
                 clicked => { App.quit(App.profile.id); }
             }
-            if App.profile.isolated: Btn {
+            if App.profile.can-sign-in: Btn {
                 text: Tr.t(Tr.lang, "action.signIn");
                 icon: Icons.key-round; has-icon: true;
                 kind: App.profile.first-run ? "primary" : "";
@@ -138,7 +138,7 @@ export component ProfilePage inherits Page {
             Btn {
                 text: App.profile.running ? Tr.t(Tr.lang, "action.focus") : Tr.t(Tr.lang, "action.open");
                 icon: Icons.play; has-icon: true;
-                kind: App.profile.first-run ? "" : "primary";
+                kind: App.profile.first-run && App.profile.can-sign-in ? "" : "primary";
                 enabled: App.profile.app-installed && App.busy == "";
                 busy: App.busy == "open";
                 clicked => { App.launch(App.profile.id); }
@@ -152,7 +152,7 @@ export component ProfilePage inherits Page {
             kind: "amber";
             icon: Icons.package-x;
             title: Tr.t1(Tr.lang, "detail.notInstalled", "app", App.profile.app-name);
-            body: Tr.t(Tr.lang, "detail.notInstalledBody");
+            body: App.profile.custom ? Tr.t(Tr.lang, "detail.addedNotInstalledBody") : Tr.t(Tr.lang, "detail.notInstalledBody");
             Btn { size: "sm"; text: Tr.t(Tr.lang, "detail.openSettings"); clicked => { App.select("settings", ""); } }
         }
     }
@@ -395,6 +395,13 @@ export component SettingsPage inherits Page {
         SectionTitle { text: Tr.t(Tr.lang, "settings.apps"); vertical-alignment: center; horizontal-stretch: 1; }
         Btn {
             size: "sm"; kind: "ghost";
+            text: Tr.t(Tr.lang, "action.addApp");
+            icon: Icons.plus; has-icon: true;
+            busy: App.apps-busy == "add";
+            clicked => { App.add-app(); }
+        }
+        Btn {
+            size: "sm"; kind: "ghost";
             text: Tr.t(Tr.lang, "action.findAgain");
             icon: Icons.refresh; has-icon: true;
             busy: App.apps-busy == "refresh";
@@ -419,9 +426,16 @@ export component SettingsPage inherits Page {
                             Text { text: a.name; font-weight: 500; color: Theme.text; vertical-alignment: center; }
                             if a.version != "": Text { text: a.version; color: Theme.text-3; vertical-alignment: center; }
                             if a.manual: Pill { text: Tr.t(Tr.lang, "settings.manual"); }
+                            if a.custom: Pill { text: a.engine; }
                         }
                         if a.installed: Text { text: a.path; font-family: Theme.mono; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
-                        if !a.installed: Text { text: Tr.t(Tr.lang, "settings.appMissing"); font-size: 12px; color: Theme.amber; wrap: word-wrap; }
+                        if !a.installed: Text { text: a.custom ? Tr.t(Tr.lang, "settings.addedAppMissing") : Tr.t(Tr.lang, "settings.appMissing"); font-size: 12px; color: Theme.amber; wrap: word-wrap; }
+                    }
+                    if a.custom: Btn {
+                        size: "sm"; kind: "ghost";
+                        text: Tr.t(Tr.lang, "action.remove");
+                        busy: App.apps-busy == a.provider;
+                        clicked => { App.remove-app(a.provider); }
                     }
                     if a.manual: Btn {
                         size: "sm"; kind: "ghost";
@@ -429,7 +443,7 @@ export component SettingsPage inherits Page {
                         enabled: App.apps-busy != a.provider;
                         clicked => { App.reset-app(a.provider); }
                     }
-                    Btn {
+                    if !a.custom: Btn {
                         size: "sm";
                         text: a.installed ? Tr.t(Tr.lang, "action.change") : Tr.t(Tr.lang, "action.choose");
                         busy: App.apps-busy == a.provider;
@@ -447,27 +461,29 @@ export component SettingsPage inherits Page {
     Gap { h: 10px; }
     Card {
         VerticalLayout {
-            for a[i] in App.apps: Row {
-                first: i == 0;
-                RowLayout {
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 1px;
-                        HorizontalLayout {
-                            cross-axis-alignment: center;
-                            alignment: start;
-                            spacing: 8px;
-                            Text { text: a.route-title; font-weight: 500; color: Theme.text; vertical-alignment: center; }
-                            if a.route-experimental: Pill { text: Tr.t(Tr.lang, "settings.experimental"); }
+            for a[i] in App.apps: VerticalLayout {
+                if !a.custom: Row {
+                    first: i == 0;
+                    RowLayout {
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 1px;
+                            HorizontalLayout {
+                                cross-axis-alignment: center;
+                                alignment: start;
+                                spacing: 8px;
+                                Text { text: a.route-title; font-weight: 500; color: Theme.text; vertical-alignment: center; }
+                                if a.route-experimental: Pill { text: Tr.t(Tr.lang, "settings.experimental"); }
+                            }
+                            Text { text: a.route-status; font-size: 12px; color: a.route-warn ? Theme.amber : Theme.text-2; wrap: word-wrap; }
                         }
-                        Text { text: a.route-status; font-size: 12px; color: a.route-warn ? Theme.amber : Theme.text-2; wrap: word-wrap; }
-                    }
-                    Switch {
-                        on: a.route-on;
-                        enabled: a.route-supported;
-                        label: a.route-title;
-                        toggled(v) => { App.set-route(a.provider, v); }
+                        Switch {
+                            on: a.route-on;
+                            enabled: a.route-supported;
+                            label: a.route-title;
+                            toggled(v) => { App.set-route(a.provider, v); }
+                        }
                     }
                 }
             }

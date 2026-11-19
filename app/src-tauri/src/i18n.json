@@ -187,7 +187,23 @@
   "error.generic": "Something went wrong",
   "action.moveUp": "Move up",
   "action.moveDown": "Move down",
-  "settings.madeWith": "Made with Slint"
+  "settings.madeWith": "Made with Slint",
+  "sheet.otherApp": "Other app…",
+  "action.addApp": "Add app",
+  "action.remove": "Remove",
+  "settings.addedAppMissing": "Not where it was when you added it",
+  "detail.addedNotInstalledBody": "It was moved or uninstalled since you added it. Remove it in Settings and add it again.",
+  "appCheck.pickTitle": "Choose an app",
+  "appCheck.ok": "{app} is an {engine} app: each profile gets a data folder of its own. Sign-in links aren't routed for added apps, so sign in from the profile's own window.",
+  "appCheck.missing": "That file doesn't exist (any more).",
+  "appCheck.sandboxed": "Flatpak and Snap apps run in a sandbox that keeps their data where the sandbox decides, so VibeLauncher can't give them a folder per profile.",
+  "appCheck.script": "This is a launcher script, and nothing next to it shows what it starts. Choose the program it runs, or the app's menu entry.",
+  "appCheck.appimage": "VibeLauncher couldn't look inside this AppImage (it needs FUSE to mount it). Extract it, or install the app another way, and choose that.",
+  "appCheck.not-chromium": "Only Electron and Chromium apps can run separate profiles: they keep everything in one folder that VibeLauncher can choose. This app isn't one of them.",
+  "appCheck.vibelauncher": "That's VibeLauncher itself.",
+  "appCheck.built-in": "VibeLauncher already knows this app: choose it from the list instead.",
+  "app.added": "Added {app}",
+  "app.removed": "Removed {app}"
  },
  "zh": {
   "app.name": "VibeLauncher",
@@ -377,7 +393,23 @@
   "error.generic": "出了点问题",
   "action.moveUp": "上移",
   "action.moveDown": "下移",
-  "settings.madeWith": "使用 Slint 构建"
+  "settings.madeWith": "使用 Slint 构建",
+  "sheet.otherApp": "其他应用…",
+  "action.addApp": "添加应用",
+  "action.remove": "移除",
+  "settings.addedAppMissing": "不在添加时的位置了",
+  "detail.addedNotInstalledBody": "添加之后它被移动或卸载了。请在设置里移除它，再重新添加。",
+  "appCheck.pickTitle": "选择应用",
+  "appCheck.ok": "{app} 是 {engine} 应用，每个配置都有自己的数据文件夹。添加的应用不转交登录链接，请在配置自己的窗口里登录。",
+  "appCheck.missing": "这个文件不存在（或已被删除）。",
+  "appCheck.sandboxed": "Flatpak 和 Snap 应用运行在沙盒里，数据放在哪里由沙盒决定，VibeLauncher 无法给每个配置单独的文件夹。",
+  "appCheck.script": "这是一个启动脚本，旁边也看不出它启动的是什么。请选择它实际运行的程序，或这个应用的菜单项。",
+  "appCheck.appimage": "VibeLauncher 无法查看这个 AppImage 的内容（需要 FUSE 才能挂载）。请先解压，或用其他方式安装这个应用，再选择它。",
+  "appCheck.not-chromium": "只有 Electron 和 Chromium 应用能分开配置：它们把所有数据放在一个可以指定的文件夹里。这个应用不属于这两类。",
+  "appCheck.vibelauncher": "这是 VibeLauncher 自己。",
+  "appCheck.built-in": "VibeLauncher 已经支持这个应用，请直接在列表里选择。",
+  "app.added": "已添加 {app}",
+  "app.removed": "已移除 {app}"
  },
  "checksEn": {
   "app-missing": [
@@ -443,6 +475,14 @@
   "data-not-dir": [
    "“{name}” can't use its data folder",
    "{path} exists but isn't a folder."
+  ],
+  "added-app-missing": [
+   "{app} isn't where it was",
+   "It was moved or uninstalled since you added it. Remove it in Settings and add it again."
+  ],
+  "not-isolated": [
+   "“{name}” may not be separate",
+   "{app} wrote nothing to this profile's folder ({dir}) after it was opened. Either it didn't start, or it keeps its data in a place of its own, and then this profile shares the account of the usual {app} window."
   ]
  },
  "checksZh": {
@@ -509,6 +549,14 @@
   "data-not-dir": [
    "“{name}”无法使用它的数据文件夹",
    "{path} 存在，但不是文件夹。"
+  ],
+  "added-app-missing": [
+   "{app} 不在原来的位置",
+   "添加之后它被移动或卸载了。请在设置里移除它，再重新添加。"
+  ],
+  "not-isolated": [
+   "“{name}”可能没有分开",
+   "打开之后，{app} 没有往这个配置的文件夹（{dir}）里写任何东西。要么它没有启动成功，要么它把数据放在自己指定的地方，那样这个配置和 {app} 平常的窗口用的是同一个账号。"
   ]
  }
 }

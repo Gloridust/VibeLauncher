@@ -40,6 +40,9 @@ Official updates keep working exactly as before.
   ever seeing each other's data. Your existing setup stays as the default profile, untouched.
 - **Sign-in that lands in the right place** — when you sign in through the browser, the link comes
   back to the profile you're signing in to, not whichever one the system picks.
+- **Other Electron and Chromium apps too** — choose **Other app…** when you make a profile to
+  add any app built on Electron or Chromium. VibeLauncher checks the app before adding it, and
+  Diagnostics tells you if one turns out to keep its data somewhere else.
 - **One-click shortcuts** — give a profile its own entry in the app menu, Launchpad or Start menu
   and open it directly.
 - **Diagnostics** — spots the things that quietly mix profiles up, such as an app that restarted
@@ -113,7 +116,8 @@ Install the `.deb` (`sudo apt install ./VibeLauncher_*.deb`) or `.rpm`
 
 ## Getting started
 
-1. Open VibeLauncher and click **New profile**. Choose Claude or ChatGPT and give it a name.
+1. Open VibeLauncher and click **New profile**. Choose Claude or ChatGPT (or another Electron or
+   Chromium app with **Other app…**) and give it a name.
 2. Click **Sign in…**. The app opens with the new, empty profile — sign in there, and allow the
    browser to open the app when it asks.
 3. That's it. Open the profile from VibeLauncher, or turn on **Shortcut** to launch it directly.
@@ -175,6 +179,8 @@ kept either way — delete a profile in VibeLauncher first if you want its data 
   profile at a time can use it.
 - **A few app-wide switches are shared**, such as Claude's "Open with Claude" menu entries.
 - **The `codex` command in the terminal** still uses your default ChatGPT account.
+- **Apps you add get their own data folder, and nothing more.** Whatever an app keeps outside that
+  folder stays shared, and their sign-in links aren't routed: sign in from the profile's own window.
 - VibeLauncher relies on how the apps behave today. If an update changes that, Diagnostics will
   tell you, and a VibeLauncher update will follow.
 

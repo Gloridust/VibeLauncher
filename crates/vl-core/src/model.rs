@@ -92,6 +92,10 @@ pub struct Settings {
     pub onboarded: bool,
     /// Look for a new version of VibeLauncher when the window opens.
     pub check_updates: bool,
+    /// Also offer prereleases (the beta program). `None` follows the
+    /// running version: on for a beta build, off for a release.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub beta_updates: Option<bool>,
 }
 
 impl Default for Settings {
@@ -105,6 +109,7 @@ impl Default for Settings {
             app_overrides: BTreeMap::new(),
             onboarded: false,
             check_updates: true,
+            beta_updates: None,
         }
     }
 }

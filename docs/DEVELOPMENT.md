@@ -28,8 +28,10 @@ isolated profiles of it, and hands it back when you turn routing off:
   gives it back on uninstall and keeps it across upgrades.
 
 Updates: the window checks `latest.json` on the latest GitHub release when it opens (unless
-turned off in Settings). Installing downloads the package of the same kind as the running copy,
-checks its signature against the public key (`app/src-tauri/src/update.rs`, also in
+turned off in Settings). With the beta program on (Settings; the default in a beta build), it
+reads `releases.atom` instead and uses the manifest of the highest published version,
+prereleases included; if that fails, it falls back to the latest release. Installing downloads
+the package of the same kind as the running copy, checks its signature against the public key (`app/src-tauri/src/update.rs`, also in
 `tauri.conf.json`), and installs it: the AppImage
 and the `.app` replace themselves, Windows runs the installer in update mode (the hooks keep
 links and shortcuts), and deb/rpm packages are installed with a single `pkexec` prompt. A build

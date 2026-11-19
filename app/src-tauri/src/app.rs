@@ -668,6 +668,7 @@ impl Ctl {
         g.set_theme(s.settings.theme.as_str().into());
         g.set_stagger(s.settings.stagger_seconds as i32);
         g.set_check_updates(s.settings.check_updates);
+        g.set_beta_updates(s.settings.beta_updates.unwrap_or_else(update::beta_by_default));
         g.set_cli(s.cli.as_str().into());
         g.set_config_file(s.config_file.as_str().into());
 
@@ -1191,12 +1192,19 @@ impl Ctl {
         });
     }
 
+    /// Whether update checks include prereleases.
+    fn beta_updates(&self) -> bool {
+        let settings = self.pending_settings.as_ref().or(self.snap.as_ref().map(|s| &s.settings));
+        settings.and_then(|s| s.beta_updates).unwrap_or_else(update::beta_by_default)
+    }
+
     fn check_update(&mut self, manual: bool) {
         self.upd.phase = UpdPhase::Checking;
         self.upd.error = None;
         self.render();
+        let beta = self.beta_updates();
         std::thread::spawn(move || {
-            let r = update::check();
+            let r = update::check(beta);
             later(move |c| {
                 match r {
                     Ok(found) => {
@@ -1859,6 +1867,15 @@ fn wire(win: &AppWindow) {
     });
     g.on_set_check_updates(|on| {
         ctl(|c| c.save_settings(|s| s.check_updates = on));
+    });
+    g.on_set_beta_updates(|on| {
+        ctl(|c| {
+            c.save_settings(|s| s.beta_updates = Some(on));
+            // Show what the new channel offers, unless an update is underway.
+            if !matches!(c.upd.phase, UpdPhase::Checking | UpdPhase::Downloading | UpdPhase::Installing) {
+                c.check_update(false);
+            }
+        });
     });
     g.on_update_action(|| {
         ctl(|c| {

@@ -1,7 +1,7 @@
 {
   "name": "vibelauncher-packaging",
   "private": true,
-  "version": "0.3.0-beta.1",
+  "version": "0.3.0-beta.2",
   "description": "Only the Tauri bundler and signer: the window itself is Rust + Slint (src-tauri).",
   "scripts": {
     "tauri": "tauri"

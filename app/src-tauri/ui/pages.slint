@@ -572,6 +572,16 @@ export component SettingsPage inherits Page {
             }
             Row {
                 RowLayout {
+                    TitleSub { title: Tr.t(Tr.lang, "update.beta"); sub: Tr.t(Tr.lang, "update.betaHint"); }
+                    Switch {
+                        on: App.beta-updates;
+                        label: Tr.t(Tr.lang, "update.beta");
+                        toggled(v) => { App.set-beta-updates(v); }
+                    }
+                }
+            }
+            Row {
+                RowLayout {
                     Text { text: Tr.t(Tr.lang, "settings.website"); color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
                     Btn { size: "sm"; text: "GitHub"; clicked => { App.open-website("home"); } }
                     Btn { size: "sm"; text: Tr.t(Tr.lang, "settings.issues"); clicked => { App.open-website("issues"); } }

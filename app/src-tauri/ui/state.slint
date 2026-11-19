@@ -121,6 +121,7 @@ export global App {
     in property <string> apps-busy;
     in property <int> stagger;
     in property <bool> check-updates;
+    in property <bool> beta-updates;
     in property <string> cli;
     in property <string> config-file;
     in property <string> update-sub;
@@ -208,6 +209,7 @@ export global App {
     callback set-route(string, bool);
     callback set-stagger(int);
     callback set-check-updates(bool);
+    callback set-beta-updates(bool);
     callback update-action();
     callback open-website(string);
     callback reveal-config();

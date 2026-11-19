@@ -17,7 +17,14 @@ use base64::Engine;
 
 /// The update key's public half (also in `tauri.conf.json`, for the bundler).
 pub const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwMDk3Qjc3N0VCNDYxNEUKUldST1liUitkM3NKa09pWU1NNjhueWkzODhENkg0YndmZjRwUzdVUVh3M1FBa0tGM3o5bCtxOVoK";
+/// The newest release. GitHub leaves prereleases out of "latest".
 const FEED: &str = "https://github.com/Gloridust/VibeLauncher/releases/latest/download/latest.json";
+/// Every published release, prereleases included, for the beta program.
+/// The Atom feed is a plain page, so it isn't held to the API's limit of 60
+/// requests an hour per address, which a shared address runs out of.
+const RELEASES: &str = "https://github.com/Gloridust/VibeLauncher/releases.atom";
+const TAGS: &str = "https://github.com/Gloridust/VibeLauncher/releases/tag/";
+const DOWNLOADS: &str = "https://github.com/Gloridust/VibeLauncher/releases/download/";
 /// The error shown in the window's own words when the password prompt was dismissed.
 pub const CANCELLED: &str = "update-cancelled";
 
@@ -102,16 +109,62 @@ fn parse(manifest: &str, current: &str, kind: Option<&str>) -> Result<Option<Fou
     }))
 }
 
-/// Ask the release feed whether there is a newer version.
-pub fn check() -> Result<Option<Found>, String> {
-    let body = agent(Duration::from_secs(20))
-        .get(FEED)
+/// Whether `version` is a prerelease (0.3.0-beta.1).
+pub fn is_prerelease(version: &str) -> bool {
+    semver::Version::parse(version).is_ok_and(|v| !v.pre.is_empty())
+}
+
+/// The beta program's setting when the user hasn't chosen: on for a beta
+/// build, so its users hear about the next beta, off for a release.
+pub fn beta_by_default() -> bool {
+    is_prerelease(env!("CARGO_PKG_VERSION"))
+}
+
+/// The tags of the published releases in the Atom feed, highest version
+/// first. Drafts aren't in the feed.
+fn feed_tags(atom: &str) -> Vec<String> {
+    let mut found: Vec<(semver::Version, String)> = atom
+        .split(TAGS)
+        .skip(1)
+        .filter_map(|rest| {
+            let tag = &rest[..rest.find('"')?];
+            Some((semver::Version::parse(tag.trim_start_matches('v')).ok()?, tag.to_string()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.dedup_by(|a, b| a.1 == b.1);
+    found.into_iter().map(|(_, tag)| tag).collect()
+}
+
+fn get(url: &str) -> Result<String, String> {
+    agent(Duration::from_secs(20))
+        .get(url)
+        .header("User-Agent", concat!("VibeLauncher/", env!("CARGO_PKG_VERSION")))
         .call()
         .map_err(|e| e.to_string())?
         .body_mut()
         .read_to_string()
-        .map_err(|e| e.to_string())?;
-    parse(&body, env!("CARGO_PKG_VERSION"), install_kind())
+        .map_err(|e| e.to_string())
+}
+
+/// Ask the release feed whether there is a newer version; with `beta`, a
+/// newer prerelease counts too.
+///
+/// For the beta program the highest published release's own manifest is
+/// read; one without a manifest is passed over. If none can be read, the
+/// release feed answers instead.
+pub fn check(beta: bool) -> Result<Option<Found>, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    if beta {
+        if let Ok(atom) = get(RELEASES) {
+            for tag in feed_tags(&atom).iter().take(3) {
+                if let Ok(body) = get(&format!("{DOWNLOADS}{tag}/latest.json")) {
+                    return parse(&body, current, install_kind());
+                }
+            }
+        }
+    }
+    parse(&get(FEED)?, current, install_kind())
 }
 
 /// Download the package, reporting (downloaded, total) as it goes.
@@ -366,6 +419,41 @@ mod tests {
         assert_eq!(f.url.as_deref(), Some("https://x/a.AppImage"));
         assert!(parse(MANIFEST, "0.3.0", None).unwrap().is_none());
         assert!(parse(MANIFEST, "0.4.0-beta.1", None).unwrap().is_none());
+    }
+
+    #[test]
+    fn feed_tags_put_the_highest_version_first() {
+        let entry = |tag: &str| format!(r#"<entry><link rel="alternate" type="text/html" href="{TAGS}{tag}"/><content>see {TAGS}{tag}"</content></entry>"#);
+        let atom = ["v0.2.1", "v0.3.0-beta.2", "nightly", "v0.3.0-beta.10", "v0.2.0"].map(entry).join("\n");
+        // Numeric order (beta.10 after beta.2), a beta of 0.3.0 above 0.2.1,
+        // a tag that isn't a version skipped, and each tag once.
+        assert_eq!(feed_tags(&atom), ["v0.3.0-beta.10", "v0.3.0-beta.2", "v0.2.1", "v0.2.0"]);
+        assert!(feed_tags("<html>rate limited</html>").is_empty());
+    }
+
+    /// Reads the real feeds: `cargo test -p vibelauncher-gui -- --ignored`.
+    #[test]
+    #[ignore = "needs the network"]
+    fn live_feeds_are_readable() {
+        let tags = feed_tags(&get(RELEASES).unwrap());
+        assert!(!tags.is_empty());
+        let beta = get(&format!("{DOWNLOADS}{}/latest.json", tags[0])).unwrap();
+        assert!(parse(&beta, "0.0.1", None).unwrap().is_some());
+        assert!(parse(&get(FEED).unwrap(), "0.0.1", None).unwrap().is_some());
+        eprintln!("newest published: {}", tags[0]);
+    }
+
+    #[test]
+    fn prereleases_are_told_apart() {
+        assert!(is_prerelease("0.3.0-beta.1"));
+        assert!(!is_prerelease("0.3.0"));
+        // A beta user gets the release once it is out; a release user is
+        // never offered a beta of the same version.
+        let release = r#"{"version":"0.3.0","platforms":{}}"#;
+        assert!(parse(release, "0.3.0-beta.2", None).unwrap().is_some());
+        let beta = r#"{"version":"0.3.0-beta.2","platforms":{}}"#;
+        assert!(parse(beta, "0.3.0", None).unwrap().is_none());
+        assert!(parse(beta, "0.3.0-beta.1", None).unwrap().is_some());
     }
 
     #[test]

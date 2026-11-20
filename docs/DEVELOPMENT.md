@@ -11,6 +11,13 @@ VibeLauncher adds the app-specific settings that make the separation complete:
 | Claude | `--user-data-dir=<profile>/electron` | `CLAUDE_CONFIG_DIR=<profile>/claude-config` |
 | ChatGPT | `--user-data-dir=<profile>/electron` | `CODEX_ELECTRON_USER_DATA_PATH`, `CODEX_HOME=<profile>/codex-home` |
 
+No profile inherits another one's folder from VibeLauncher itself: if VibeLauncher was opened
+from inside a profile (from a Claude Code session in it, say), an isolation variable pointing
+into a profile's data is dropped at launch, and with `CLAUDECODE` set so are that session's
+`CLAUDE*` variables; a folder the user set elsewhere is kept (`inherited_to_remove` in
+`crates/vl-core/src/provider.rs`). Diagnostics reports a default profile already running with
+one (`borrowed-env`).
+
 Other apps can be added (**Other app…**, or `vibelauncher app add`). Only Electron and Chromium
 apps are accepted, because only they keep everything in a folder VibeLauncher can choose; they are
 recognised by the files every build ships (`resources/app.asar`, `v8_context_snapshot.bin`, the

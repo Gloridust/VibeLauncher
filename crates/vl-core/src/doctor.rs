@@ -224,6 +224,31 @@ pub fn run(l: &mut Launcher) -> Vec<Check> {
                 }
             }
         }
+        // The default profile running with another profile's folder: it was
+        // started by a VibeLauncher that inherited that profile's variables
+        // (opened from a Claude Code session inside it, say).
+        let ours: Vec<std::path::PathBuf> = std::iter::once(l.paths.profiles_dir.clone())
+            .chain(l.config.profiles.iter().filter(|p| p.isolated).map(|p| p.data_root(&l.paths)))
+            .collect();
+        for p in profiles.iter().filter(|p| !p.isolated) {
+            let borrowed = snap.for_profile(&p.id).into_iter().find_map(|a| {
+                let env = a.environ.as_ref()?;
+                let pairs = crate::provider::ISOLATION_VARS.iter().filter_map(|k| Some((k.to_string(), env.get(*k)?.clone())));
+                crate::provider::inherited_to_remove(pairs, &ours).into_iter().next().map(|k| (k.clone(), env[&k].clone()))
+            });
+            if let Some((var, dir)) = borrowed {
+                out.push(
+                    Check::new(
+                        format!("{}-borrowed-env", p.id),
+                        Level::Warning,
+                        format!("“{}” is running with another profile's {var}", p.name),
+                        format!("It reads that profile's data ({dir}) instead of its own, so things it should find, such as Claude's Code sessions, look missing. This happens when VibeLauncher itself was opened from inside a profile, for example from a Claude Code session. Restart it from VibeLauncher to fix it."),
+                    )
+                    .code("borrowed-env", &[("name", p.name.clone()), ("var", var), ("dir", dir), ("app", name.into())])
+                    .fix(Fix::Restart { profiles: vec![p.id.clone()] }),
+                );
+            }
+        }
         for running in snap.apps.iter().filter(|a| a.provider == app && a.profile_id.is_none()) {
             out.push(Check::new(
                 format!("{}-unknown-{}", app.id(), running.pid),

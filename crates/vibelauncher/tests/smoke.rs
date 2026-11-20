@@ -786,6 +786,27 @@ fn added_app() {
     );
     wait_running("Notes Work", true);
 
+    // A VibeLauncher opened from a Claude Code session inside "Notes Work"
+    // must not pass that profile's folder on to the app's default profile.
+    let n = launches_in(&exe_dir).len();
+    let default_id = profile("Notely")["id"].as_str().unwrap().to_string();
+    let mut c = Command::new(CMD);
+    c.args(["launch", &default_id]);
+    for (k, v) in &vars {
+        c.env(k, v);
+    }
+    let borrowed = data.join("claude-config");
+    c.env("CLAUDE_CONFIG_DIR", &borrowed).env("CODEX_HOME", data.join("codex-home")).env("CLAUDECODE", "1");
+    assert!(c.status().unwrap().success());
+    let l = wait_launch_in(&exe_dir, "the default profile to start", n, |v| udd_of(v).is_none());
+    let env = l["env"].as_object().unwrap();
+    assert!(
+        !env.contains_key("CLAUDE_CONFIG_DIR") && !env.contains_key("CODEX_HOME"),
+        "the default profile got another profile's folder: {l}"
+    );
+    ok(&["quit", &default_id]);
+    wait_running("Notely", false);
+
     // Its profiles have to go before the app can.
     assert!(!run(&["app", "remove", "notely"]).status.success(), "removed an app that still had profiles");
     ok(&["quit", &id]);

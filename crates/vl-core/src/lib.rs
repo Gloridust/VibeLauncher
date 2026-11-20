@@ -226,7 +226,20 @@ impl Launcher {
                 AppId::Custom(_) => anyhow!("{name} isn't where it was when you added it. Remove it in Settings and add it again."),
             });
         };
-        Ok(provider::build_launch_spec(&p, &self.paths, &inst.program, &inst.base_args, inst.bundle.as_deref(), url))
+        // Every folder that holds profile data, to recognise a profile's
+        // variables VibeLauncher may have inherited (see `inherited_to_remove`).
+        let mut ours = vec![self.paths.profiles_dir.clone()];
+        ours.extend(self.config.profiles.iter().filter(|x| x.isolated).map(|x| x.data_root(&self.paths)));
+        Ok(provider::build_launch_spec_from(
+            &p,
+            &self.paths,
+            &inst.program,
+            &inst.base_args,
+            inst.bundle.as_deref(),
+            url,
+            std::env::vars(),
+            &ours,
+        ))
     }
 
     /// Start (or bring to front) a profile, optionally handing it a URL.

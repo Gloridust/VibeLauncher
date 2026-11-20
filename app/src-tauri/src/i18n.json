@@ -483,6 +483,10 @@
   "not-isolated": [
    "“{name}” may not be separate",
    "{app} wrote nothing to this profile's folder ({dir}) after it was opened. Either it didn't start, or it keeps its data in a place of its own, and then this profile shares the account of the usual {app} window."
+  ],
+  "borrowed-env": [
+   "“{name}” is running with another profile's {var}",
+   "It reads that profile's data ({dir}) instead of its own, so things it should find, such as Claude's Code sessions, look missing. This happens when VibeLauncher itself was opened from inside a profile, for example from a Claude Code session. Restart it from VibeLauncher to fix it."
   ]
  },
  "checksZh": {
@@ -557,6 +561,10 @@
   "not-isolated": [
    "“{name}”可能没有分开",
    "打开之后，{app} 没有往这个配置的文件夹（{dir}）里写任何东西。要么它没有启动成功，要么它把数据放在自己指定的地方，那样这个配置和 {app} 平常的窗口用的是同一个账号。"
+  ],
+  "borrowed-env": [
+   "“{name}”正在使用另一个配置的 {var}",
+   "它读的是那个配置的数据（{dir}），不是自己的，所以本该找到的东西（比如 Claude 的 Code 会话）会显示找不到。这通常是因为 VibeLauncher 本身是从某个配置里面打开的，比如从一个 Claude Code 会话里。从 VibeLauncher 重启它即可修复。"
   ]
  }
 }

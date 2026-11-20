@@ -184,7 +184,7 @@ trait Provider {
 | 认进程 | 命令行里的 `--user-data-dir` | 同左 |
 | 已知共享（不能隔离） | Cowork 虚拟机、`os-entry-points.json` | 待查 |
 
-**用户自己添加的应用**（0.3.0-beta.3 起）：新建配置时选“其他应用…”或 `vibelauncher app add`。只接受 Electron 和 Chromium 应用，因为只有它们把数据整个放在一个能用 `--user-data-dir` 指定的文件夹里；靠每个构建都带的文件识别（`resources/app.asar`、`v8_context_snapshot.bin`、`.app` 里的 Electron 框架；AppImage 先用 `--appimage-mount` 挂上再看）。Flatpak、Snap 不接受，数据位置由沙盒决定。添加的应用只传 `--user-data-dir`，不接管登录链接。静态识别证明不了应用不在代码里另选目录，所以配置打开过 20 秒后文件夹仍是空的，doctor 会提示“可能没有分开”。代码里用 `AppId`（内置的 `ProviderKind` 或添加的应用 id）表示配置属于哪个应用，路由和官方应用查找仍只针对 `ProviderKind`。配置文件里存为 `[[app]]`，有添加的应用时写 schema 2，旧版本读到会提示升级，而不是读错。
+**用户自己添加的应用**（0.3.0-beta.3 起，随 beta.4 发布）：新建配置时选“其他应用…”或 `vibelauncher app add`。只接受 Electron 和 Chromium 应用，因为只有它们把数据整个放在一个能用 `--user-data-dir` 指定的文件夹里；靠每个构建都带的文件识别（`resources/app.asar`、`v8_context_snapshot.bin`、`.app` 里的 Electron 框架；AppImage 先用 `--appimage-mount` 挂上再看）。Flatpak、Snap 不接受，数据位置由沙盒决定。添加的应用只传 `--user-data-dir`，不接管登录链接。静态识别证明不了应用不在代码里另选目录，所以配置打开过 20 秒后文件夹仍是空的，doctor 会提示“可能没有分开”。代码里用 `AppId`（内置的 `ProviderKind` 或添加的应用 id）表示配置属于哪个应用，路由和官方应用查找仍只针对 `ProviderKind`。配置文件里存为 `[[app]]`，有添加的应用时写 schema 2，旧版本读到会提示升级，而不是读错。
 
 **为什么环境变量和参数都要传**：命令行在三个平台上都能被其他进程读到，用来认出进程属于哪个 Profile 最可靠；环境变量只在启动时生效，更新重启时可能丢（第 9 节）。
 

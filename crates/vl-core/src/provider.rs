@@ -190,6 +190,51 @@ const SCRUB_ALWAYS: [&str; 6] = [
     "CLAUDE_CODE_SSE_PORT",
 ];
 
+/// Variables VibeLauncher sets to isolate a profile's data.
+pub const ISOLATION_VARS: [&str; 4] = ["CLAUDE_CONFIG_DIR", "CLAUDE_USER_DATA_DIR", "CODEX_HOME", "CODEX_ELECTRON_USER_DATA_PATH"];
+
+/// Variables in VibeLauncher's own environment `env` that must not reach an
+/// app it starts, whatever the profile:
+///
+/// - An isolation variable ([`ISOLATION_VARS`]) pointing into one of `ours`
+///   (the profiles folder and every profile's data folder) belongs to some
+///   profile, and VibeLauncher only has it because it was itself started
+///   from inside that profile (from a Claude Code session in it, say). Passed
+///   on, the default profile would read that profile's data: Claude's Code
+///   tab looks for its sessions there and reports them missing. One the user
+///   pointed somewhere else is theirs, and stays.
+/// - Started from a Claude Code session (`CLAUDECODE` is set), VibeLauncher
+///   also carries that session's variables: its id, account, messaging
+///   socket and token, and switches the desktop app set for it
+///   (`CLAUDE_CODE_DISABLE_CRON`, …). Those can't be told apart from a user's
+///   own `CLAUDE_CODE_*` settings by name, so every `CLAUDE*` variable goes,
+///   except the two above, which are judged by where they point.
+pub fn inherited_to_remove(env: impl IntoIterator<Item = (String, String)>, ours: &[PathBuf]) -> Vec<String> {
+    let env: Vec<(String, String)> = env.into_iter().collect();
+    let from_session = env.iter().any(|(k, _)| k == "CLAUDECODE");
+    let inside = |v: &str| {
+        let p = Path::new(v);
+        let real = p.canonicalize().ok();
+        ours.iter().any(|o| {
+            let o_real = o.canonicalize().ok();
+            p.starts_with(o) || real.as_ref().is_some_and(|r| r.starts_with(o) || o_real.as_ref().is_some_and(|or| r.starts_with(or)))
+        })
+    };
+    let mut out: Vec<String> = env
+        .iter()
+        .filter(|(k, v)| {
+            if ISOLATION_VARS.contains(&k.as_str()) {
+                inside(v)
+            } else {
+                from_session && k.starts_with("CLAUDE")
+            }
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    out.sort();
+    out
+}
+
 /// The app a profile belongs to: a built-in one, or one the user added
 /// (`[[app]]` in the config), by its id. Written as the id alone
 /// (`provider = "claude"`, `provider = "obsidian"`), so configurations
@@ -332,6 +377,23 @@ pub fn build_launch_spec(
     bundle: Option<&Path>,
     url: Option<&str>,
 ) -> LaunchSpec {
+    let ours = [paths.profiles_dir.clone(), profile.data_root(paths)];
+    build_launch_spec_from(profile, paths, program, base_args, bundle, url, std::env::vars(), &ours)
+}
+
+/// [`build_launch_spec`], given VibeLauncher's environment and every folder
+/// that holds profile data (see [`inherited_to_remove`]).
+#[allow(clippy::too_many_arguments)]
+pub fn build_launch_spec_from(
+    profile: &Profile,
+    paths: &Paths,
+    program: &Path,
+    base_args: &[String],
+    bundle: Option<&Path>,
+    url: Option<&str>,
+    env: impl IntoIterator<Item = (String, String)>,
+    ours: &[PathBuf],
+) -> LaunchSpec {
     let provider = &profile.provider;
     // e.g. `flatpak run com.example.App`: these come before the app's own flags.
     let mut args: Vec<OsString> = base_args.iter().map(OsString::from).collect();
@@ -353,11 +415,17 @@ pub fn build_launch_spec(
     if let Some(u) = url {
         args.push(u.into());
     }
+    let mut remove_env: Vec<String> = provider.scrub_env(profile.isolated).into_iter().map(String::from).collect();
+    for k in inherited_to_remove(env, ours) {
+        if !remove_env.contains(&k) {
+            remove_env.push(k);
+        }
+    }
     LaunchSpec {
         program: program.to_path_buf(),
         args,
         set_env,
-        remove_env: provider.scrub_env(profile.isolated).into_iter().map(String::from).collect(),
+        remove_env,
         bundle: bundle.map(Path::to_path_buf),
         mkdirs,
     }
@@ -394,6 +462,80 @@ mod tests {
         assert!(s.args.is_empty());
         assert!(s.set_env.is_empty());
         assert!(!s.remove_env.contains(&"CODEX_HOME".to_string()));
+    }
+
+    fn vars(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// The default profile started by a VibeLauncher that was itself opened
+    /// from a Claude Code session in the "work" profile.
+    #[test]
+    fn default_profile_drops_another_profiles_variables() {
+        let paths = Paths::under(Path::new("/tmp/vl"));
+        let work = paths.profiles_dir.join("work");
+        let ours = [paths.profiles_dir.clone(), PathBuf::from("/data/custom-profile")];
+        let env = vars(&[
+            ("CLAUDE_CONFIG_DIR", &work.join("claude-config").to_string_lossy()),
+            ("CODEX_HOME", "/data/custom-profile/codex-home"),
+            ("CLAUDECODE", "1"),
+            ("CLAUDE_CODE_SESSION_ID", "abc"),
+            ("CLAUDE_CODE_MESSAGING_TOKEN", "secret"),
+            ("CLAUDE_CODE_DISABLE_CRON", "1"),
+            ("CLAUDE_AGENT_SDK_VERSION", "1"),
+            ("CLAUDE_DESKTOP_STARTED_PATH", "/x"),
+            ("CLAUDE_PID", "42"),
+            ("ANTHROPIC_BASE_URL", "http://127.0.0.1:8080"),
+            ("PATH", "/usr/bin"),
+        ]);
+        let p = Profile::default_for(ProviderKind::Claude);
+        let s = build_launch_spec_from(&p, &paths, Path::new("/usr/bin/claude-desktop"), &[], None, None, env, &ours);
+        for k in [
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "CLAUDECODE",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "CLAUDE_CODE_DISABLE_CRON",
+            "CLAUDE_AGENT_SDK_VERSION",
+            "CLAUDE_DESKTOP_STARTED_PATH",
+            "CLAUDE_PID",
+        ] {
+            assert!(s.remove_env.contains(&k.to_string()), "{k} was passed on");
+        }
+        assert!(!s.remove_env.contains(&"ANTHROPIC_BASE_URL".to_string()));
+        assert!(!s.remove_env.contains(&"PATH".to_string()));
+    }
+
+    /// Settings the user made themselves reach the app as before.
+    #[test]
+    fn the_users_own_settings_stay() {
+        let ours = [PathBuf::from("/tmp/vl/profiles")];
+        let env = vars(&[
+            ("CLAUDE_CONFIG_DIR", "/home/me/.claude-work"),
+            ("CODEX_HOME", "/home/me/.codex"),
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+        ]);
+        // Not started from a Claude Code session: nothing is taken away.
+        assert!(inherited_to_remove(env.clone(), &ours).is_empty());
+        // From a session, its variables go, but folders of the user's own stay.
+        let mut env = env;
+        env.push(("CLAUDECODE".into(), "1".into()));
+        assert_eq!(inherited_to_remove(env, &ours), ["CLAUDECODE", "CLAUDE_CODE_USE_BEDROCK"]);
+    }
+
+    /// An isolated profile also drops another profile's variables (it sets
+    /// its own afterwards).
+    #[test]
+    fn isolated_profile_drops_the_other_apps_folder() {
+        let paths = Paths::under(Path::new("/tmp/vl"));
+        let mut p = Profile::default_for(ProviderKind::Claude);
+        p.id = "work".into();
+        p.isolated = true;
+        let env = vars(&[("CODEX_HOME", "/tmp/vl/profiles/chat/codex-home")]);
+        let s = build_launch_spec_from(&p, &paths, Path::new("/x"), &[], None, None, env, std::slice::from_ref(&paths.profiles_dir));
+        assert!(s.remove_env.contains(&"CODEX_HOME".to_string()));
+        assert!(s.set_env.iter().any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
     }
 
     #[test]

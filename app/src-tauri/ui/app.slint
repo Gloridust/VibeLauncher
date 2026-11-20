@@ -1,0 +1,182 @@
+// VibeLauncher's manager window.
+
+import { Theme, Tr, Icons } from "theme.slint";
+import { Icon, IconBtn, Btn, SegOption } from "widgets.slint";
+import { App, SideRow, ProfileView, AppRow, CheckRow, ChoiceRow, ToastItem } from "state.slint";
+import { Sidebar } from "sidebar.slint";
+import { DragArea, WindowButtons } from "chrome.slint";
+import { ProfilePage, DiagnosticsPage, SettingsPage, WelcomePage } from "pages.slint";
+import { ProfileSheet, DeleteSheet, LoginSheet, RouteSheet } from "sheets.slint";
+
+export { Theme, Tr, App, SideRow, ProfileView, AppRow, CheckRow, ChoiceRow, ToastItem, SegOption }
+
+component MenuItem {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 30px;
+    Rectangle { border-radius: 6px; background: ta.has-hover && enabled ? Theme.hover : transparent; }
+    HorizontalLayout {
+        cross-axis-alignment: center;
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        opacity: enabled ? 1 : 0.4;
+        Icon { source: icon; size: 15px; colorize: danger ? Theme.red : Theme.text-2; }
+        Text { text: root.text; color: danger ? Theme.red : Theme.text; vertical-alignment: center; }
+    }
+    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component MenuSeparator inherits Rectangle {
+    height: 9px;
+    Rectangle { y: 4px; height: 1px; background: Theme.line; }
+}
+
+export component AppWindow inherits Window {
+    title: "VibeLauncher";
+    icon: Icons.logo;
+    preferred-width: 980px;
+    preferred-height: 660px;
+    min-width: 760px;
+    min-height: 520px;
+    background: Theme.bg;
+    default-font-size: 13px;
+    // Outside macOS the window draws its own title bar.
+    no-frame: !Theme.mac;
+    // Resizing a frameless window from its edges (handled by the backend).
+    resize-border-width: Theme.mac || App.maximized ? 0 : 6px;
+
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(e) => {
+            if (App.sheet != "" || !App.loaded) { return reject; }
+            if ((e.modifiers.control || e.modifiers.meta) && (e.text == "n" || e.text == "N")) { App.new-profile(""); return accept; }
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == ",") { App.select("settings", ""); return accept; }
+            if (e.text == Key.DownArrow) { App.select("next", ""); return accept; }
+            if (e.text == Key.UpArrow) { App.select("prev", ""); return accept; }
+            reject
+        }
+    }
+
+    if !App.loaded && App.load-error != "": VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+        padding: 48px;
+        Text { text: Tr.t(Tr.lang, "error.generic"); font-size: 22px; font-weight: 600; color: Theme.text; horizontal-alignment: center; }
+        Text { text: App.load-error; color: Theme.text-2; horizontal-alignment: center; wrap: word-wrap; }
+        HorizontalLayout {
+            cross-axis-alignment: center; alignment: center; Btn { text: Tr.t(Tr.lang, "action.runAgain"); clicked => { App.recheck(); } } }
+    }
+
+    if App.loaded: HorizontalLayout {
+        Sidebar {}
+        VerticalLayout {
+            // top bar: page title, page actions, window buttons
+            Rectangle {
+                height: 52px;
+                DragArea {}
+                HorizontalLayout {
+                    cross-axis-alignment: center;
+                    padding-left: 22px;
+                    padding-right: Theme.mac ? 14px : 10px;
+                    spacing: 6px;
+                    Text {
+                        text: App.page == "diagnostics" ? Tr.t(Tr.lang, "diag.title") : App.page == "settings" ? Tr.t(Tr.lang, "settings.title") : "";
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    if App.page == "diagnostics": Btn {
+                        size: "sm";
+                        text: Tr.t(Tr.lang, "action.runAgain");
+                        icon: Icons.refresh; has-icon: true;
+                        busy: App.checking;
+                        enabled: App.checks-loaded;
+                        clicked => { App.recheck(); }
+                    }
+                    if App.page == "profile": more := IconBtn {
+                        icon: Icons.ellipsis;
+                        label: Tr.t(Tr.lang, "action.more");
+                        clicked => { menu.show(); }
+                    }
+                    if !Theme.mac: Rectangle { width: 8px; }
+                    if !Theme.mac: WindowButtons { height: 28px; }
+                }
+            }
+            if App.page == "profile": ProfilePage { vertical-stretch: 1; }
+            if App.page == "diagnostics": DiagnosticsPage { vertical-stretch: 1; }
+            if App.page == "settings": SettingsPage { vertical-stretch: 1; }
+            if App.page == "welcome": WelcomePage { vertical-stretch: 1; }
+        }
+    }
+
+    menu := PopupWindow {
+        x: root.width - 230px - (Theme.mac ? 14px : 124px);
+        y: 46px;
+        width: 230px;
+        Rectangle {
+            border-radius: 10px;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: Theme.shadow;
+        }
+        VerticalLayout {
+            padding: 5px;
+            MenuItem { icon: Icons.pencil; text: Tr.t(Tr.lang, "action.edit"); clicked => { App.edit(App.profile.id); } }
+            MenuItem { icon: Icons.folder-open; text: Tr.t(Tr.lang, "action.showData"); enabled: App.profile.isolated; clicked => { App.show-data(App.profile.id); } }
+            MenuItem { icon: Icons.copy; text: Tr.t(Tr.lang, "action.copyCommand"); clicked => { App.copy-command(App.profile.id); } }
+            MenuSeparator {}
+            MenuItem { icon: Icons.chevron-right; text: Tr.t(Tr.lang, "action.moveUp"); enabled: App.profile.can-move-up; clicked => { App.move-profile(App.profile.id, -1); } }
+            MenuItem { icon: Icons.chevron-right; text: Tr.t(Tr.lang, "action.moveDown"); enabled: App.profile.can-move-down; clicked => { App.move-profile(App.profile.id, 1); } }
+            MenuSeparator {}
+            MenuItem { icon: Icons.trash; text: Tr.t(Tr.lang, "action.delete"); danger: true; enabled: App.profile.isolated; clicked => { App.delete(App.profile.id); } }
+        }
+    }
+
+    if App.sheet == "new" || App.sheet == "edit": ProfileSheet {}
+    if App.sheet == "delete": DeleteSheet {}
+    if App.sheet == "login": LoginSheet {}
+    if App.sheet == "route": RouteSheet {}
+
+    // toasts
+    VerticalLayout {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 20px;
+        width: min(420px, root.width - 48px);
+        height: self.preferred-height;
+        spacing: 8px;
+        alignment: end;
+        for t in App.toasts: Rectangle {
+            height: max(38px, tl.preferred-height + 18px);
+            border-radius: 10px;
+            background: Theme.dark ? #3a3a36 : #1f1e1c;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: Theme.shadow;
+            tl := HorizontalLayout {
+                cross-axis-alignment: center;
+                padding-left: 12px;
+                padding-right: 14px;
+                padding-top: 9px;
+                padding-bottom: 9px;
+                spacing: 8px;
+                Icon { source: t.error ? Icons.circle-alert : Icons.circle-check; size: 16px; colorize: t.error ? #ef6a5e : #4cc38a; }
+                Text { text: t.text; color: #f2f0ea; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+            }
+        }
+    }
+
+    if !Theme.mac && !App.maximized: Rectangle {
+        border-width: 1px;
+        border-color: Theme.line-strong;
+    }
+}

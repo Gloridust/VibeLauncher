@@ -4,7 +4,7 @@
 
 ## 应用内更新（必需）
 
-窗口里的“更新并重启”读最新 Release 里的 `latest.json`，只安装用这把密钥签过的文件（公钥在 `app/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）。
+窗口里的“更新并重启”读最新 Release 里的 `latest.json`（加入 Beta 计划时读版本号最高的已发布 Release，含预发布），只安装用这把密钥签过的文件（公钥写在 `app/src-tauri/src/update.rs` 的 `PUBKEY`，`app/src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 里也有一份，测试会检查两者一致）。格式与 0.2.0 及更早的 Tauri 窗口相同，新旧版本可以互相更新。
 
 | Secret | 内容 |
 |---|---|
@@ -48,7 +48,7 @@ Tauri 会把证书导入临时钥匙串，给窗口程序和随附的 `vibelaunc
 
 ## 发版前
 
-1. 改 `Cargo.toml`（workspace）、`app/package.json`、`app/src-tauri/tauri.conf.json` 里的版本号。
+1. 改 `Cargo.toml`（workspace）、`app/package.json`、`app/src-tauri/tauri.conf.json` 里的版本号。预发布用 semver 预发布号（如 `0.3.0-beta.1`）：rpm 不接受 `-`，工作流会把它打成版本 `0.3.0`、release `0.beta.1`（排在正式版 `0.3.0-1` 之前），文件名仍是完整版本号。草稿出来后发布为 **Pre-release**，它不会成为 Latest：只有在设置里加入了 Beta 计划的用户会收到它（测试版默认加入）。Beta 计划从 `releases.atom` 里找版本号最高的已发布 Release，读它自己的 `latest.json`，所以预发布也必须带 `latest.json`。
 2. CI、Window 两个工作流全绿（Window 会在 macOS、Windows 上打开窗口并把操作点一遍）。
 3. 如果这一版动了登录链接的转交，在 macOS、Windows 上用真实账号按 [TESTING.md](TESTING.md) 走一遍。
 4. `git tag v0.1.0 && git push origin v0.1.0`，等草稿 Release 出来，下载各平台的包装一次，再发布。

@@ -7,7 +7,7 @@
 use std::process::ExitCode;
 
 use anyhow::{anyhow, bail, Result};
-use vl_core::{doctor, router, scheme, Decision, Launcher, ProfileInput, ProviderKind};
+use vl_core::{doctor, router, scheme, AppId, Decision, Launcher, ProfileInput, ProviderKind};
 
 const HELP: &str = "\
 VibeLauncher — run Claude and ChatGPT desktop with separate profiles.
@@ -20,9 +20,14 @@ USAGE
                                        will come back to it (for 5 minutes)
   vibelauncher quit <profile>          Ask a profile's app to quit
   vibelauncher open-url [URL]          Route a claude:// or codex:// link
-  vibelauncher create <name> --app claude|chatgpt [--color #RRGGBB]
+  vibelauncher create <name> --app claude|chatgpt|<added app> [--color #RRGGBB]
                       [--data <dir>] [--shortcut]
   vibelauncher delete <profile> [--delete-data]
+  vibelauncher app add <path> [--name <name>]
+                                       Add another Electron or Chromium app (its
+                                       program, .desktop entry, AppImage or .app)
+  vibelauncher app list                List the apps you added
+  vibelauncher app remove <app>        Remove one (delete its profiles first)
   vibelauncher doctor [--fix] [--json] Find and fix common problems
   vibelauncher shortcuts sync          Recreate launcher shortcuts
   vibelauncher scheme status|claim|release [claude|chatgpt]
@@ -83,7 +88,7 @@ impl Args {
 pub fn is_command(first: &str) -> bool {
     const CMDS: &[&str] = &[
         "-h", "--help", "help", "-V", "--version", "version", "list", "ls", "ps", "launch", "open", "login", "quit",
-        "open-url", "route", "create", "new", "delete", "rm", "doctor", "shortcuts", "scheme", "log", "cleanup",
+        "open-url", "route", "create", "new", "delete", "rm", "app", "apps", "doctor", "shortcuts", "scheme", "log", "cleanup",
         "internal-reassert", "internal-restore",
     ];
     CMDS.contains(&first) || first.contains("://")
@@ -147,8 +152,8 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
             let a = Args::parse(rest, &["app", "color", "data", "icon"])?;
             let provider = a
                 .val("app")
-                .and_then(ProviderKind::parse)
-                .ok_or_else(|| anyhow!("--app claude|chatgpt is required"))?;
+                .map(AppId::parse)
+                .ok_or_else(|| anyhow!("--app claude|chatgpt|<added app> is required"))?;
             let mut l = Launcher::open()?;
             let p = l.create_profile(ProfileInput {
                 name: a.need(0, "name")?.into(),
@@ -161,6 +166,30 @@ pub fn run(raw: Vec<String>) -> Result<ExitCode> {
                 shortcut: a.has("shortcut"),
             })?;
             println!("Created {} ({}). Data: {}", p.name, p.id, p.data_root(&l.paths).display());
+        }
+        "app" | "apps" => {
+            let a = Args::parse(rest, &["name"])?;
+            let mut l = Launcher::open()?;
+            match a.pos.first().map(String::as_str).unwrap_or("list") {
+                "add" => {
+                    let path = std::path::absolute(a.need(1, "the app's path")?)?;
+                    let mut d = l.inspect_app(&path)?;
+                    if let Some(n) = a.val("name") {
+                        d.name = n.into();
+                    }
+                    let engine = d.engine.as_str();
+                    let id = l.add_app(d)?;
+                    let name = l.config.app_name(&AppId::Custom(id.clone()));
+                    println!("Added {name} ({engine}) as `{id}`. Make a profile with: vibelauncher create <name> --app {id}");
+                }
+                "remove" | "rm" => l.remove_app(a.need(1, "app")?)?,
+                "list" | "ls" => {
+                    for app in &l.config.apps {
+                        println!("{:<20} {}  {} ({})", app.id, app.name, app.program.display(), app.engine);
+                    }
+                }
+                o => bail!("unknown `app {o}`"),
+            }
         }
         "delete" | "rm" => {
             let a = Args::parse(rest, &[])?;
@@ -340,16 +369,16 @@ fn list(l: &mut Launcher, json: bool) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "config": l.paths.config_file(), "profiles": v,
+                "config": l.paths.config_file(), "profiles": v, "apps": l.config.apps,
             }))?
         );
         return Ok(());
     }
-    for provider in ProviderKind::ALL {
-        let inst = l.install(provider);
+    for provider in l.config.app_ids() {
+        let inst = l.install(&provider);
         println!(
             "{} {}",
-            provider.display_name(),
+            l.config.app_name(&provider),
             match &inst {
                 Some(i) => i.version.clone().unwrap_or_default(),
                 None => "(not found)".into(),

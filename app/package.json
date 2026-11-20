@@ -1,23 +1,12 @@
 {
-  "name": "vibelauncher-ui",
+  "name": "vibelauncher-packaging",
   "private": true,
-  "version": "0.2.0",
-  "type": "module",
+  "version": "0.3.0",
+  "description": "Only the Tauri bundler and signer: the window itself is Rust + Slint (src-tauri).",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
     "tauri": "tauri"
   },
-  "dependencies": {
-    "@tauri-apps/api": "2.12.4",
-    "@tauri-apps/plugin-dialog": "2.8.4",
-    "lucide-preact": "1.72.0",
-    "preact": "11.2.0"
-  },
   "devDependencies": {
-    "@preact/preset-vite": "2.10.6",
-    "@tauri-apps/cli": "2.12.4",
-    "typescript": "5.9.3",
-    "vite": "8.3.8"
+    "@tauri-apps/cli": "2.12.4"
   }
 }

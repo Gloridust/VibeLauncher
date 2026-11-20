@@ -73,7 +73,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf rpm
+          # The window needs only fontconfig and xkbcommon; the AppImage
+          # bundler still expects the GTK/WebKit libraries to be present.
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf rpm
 
       - name: Build the command
         run: cargo build --release --locked -p vibelauncher --target ${{ matrix.target }}
@@ -89,7 +91,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/vibelauncher$ext" \
              "app/src-tauri/binaries/vibelauncher-${{ matrix.target }}$ext"
 
-      - name: Install frontend dependencies
+      # Only the Tauri bundler and signer; the window itself is Rust + Slint.
+      - name: Install the packaging tools
         working-directory: app
         run: pnpm install --frozen-lockfile
 
@@ -151,13 +154,35 @@ jobs:
             echo "No update signing key: building without update files"
           fi
 
-      - name: Build the window and packages
+      - name: Build the window
+        run: cargo build --release --locked -p vibelauncher-gui --target ${{ matrix.target }}
+
+      - name: Make the packages
         working-directory: app
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG $UPDATER_CONFIG
+        run: |
+          target=${{ matrix.target }}
+          bundles=${{ matrix.bundles }}
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          conf="--config src-tauri/tauri.bundle.conf.json $SIGN_CONFIG $UPDATER_CONFIG"
+          if [[ ",$bundles," == *,rpm,* && "$version" == *-* ]]; then
+            # An rpm version can't contain "-". A prerelease (0.3.0-beta.1)
+            # goes in as version 0.3.0, release 0.beta.1, which rpm sorts
+            # before the final 0.3.0-1; the file keeps the full version.
+            base=${version%%-*} pre=${version#*-}
+            others=$(tr ',' '\n' <<<"$bundles" | grep -vx rpm | paste -sd, -)
+            pnpm tauri bundle --target "$target" --bundles "$others" $conf
+            pnpm tauri bundle --target "$target" --bundles rpm $conf \
+              --config "{\"version\":\"$base\",\"bundle\":{\"linux\":{\"rpm\":{\"release\":\"0.$pre\"}}}}"
+            cd "../target/$target/release/bundle/rpm"
+            for f in VibeLauncher-"$base"-0."$pre".*.rpm*; do mv "$f" "${f/-$base-0.$pre./-$version.}"; done
+            ls
+          else
+            pnpm tauri bundle --target "$target" --bundles "$bundles" $conf
+          fi
 
       - name: Gather the update files
         if: env.UPDATER_CONFIG != ''

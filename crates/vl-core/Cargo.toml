@@ -17,6 +17,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 url = "2"
 trash = "5"
 base64 = "0.22"
+semver = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

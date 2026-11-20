@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/public/logo.svg" width="96" alt="VibeLauncher">
+  <img src="app/src-tauri/ui/logo.svg" width="96" alt="VibeLauncher">
 </p>
 
 <h1 align="center">VibeLauncher</h1>
@@ -14,6 +14,7 @@
   <a href="https://github.com/Gloridust/VibeLauncher/releases/latest"><img src="https://img.shields.io/github/v/release/Gloridust/VibeLauncher" alt="Release"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-555" alt="Platforms">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555" alt="MIT License"></a>
+  <a href="https://slint.dev"><img src="https://img.shields.io/badge/made%20with-Slint-2379F4" alt="Made with Slint"></a>
 </p>
 
 <p align="center">
@@ -34,6 +35,7 @@ Claude 和 ChatGPT 桌面版同一时间只能登录一个账号。VibeLauncher 
 
 - **互相独立的配置**：同一个应用的多个账号可以同时运行，彼此看不到对方的数据。你原来的应用保持原样，作为默认配置。
 - **登录回到对的地方**：在浏览器里登录完成后，链接会回到你正在登录的那个配置，而不是系统随便挑的一个。
+- **也支持其他 Electron 和 Chromium 应用**：新建配置时选“其他应用…”，就能添加任何基于 Electron 或 Chromium 的应用。VibeLauncher 会先检查它能不能分开，如果它其实把数据放在别处，“诊断”会提示你。
 - **一键快捷方式**：给配置在应用菜单、启动台或开始菜单里加一个入口，直接打开。
 - **诊断**：发现那些会让配置悄悄混在一起的问题（比如应用更新后自己重启、丢了配置），一键修复。
 - **轻量**：一个很小的启动器加一个原生窗口，窗口只在你使用时运行，不常驻后台。
@@ -96,7 +98,7 @@ xattr -dr com.apple.quarantine /Applications/VibeLauncher.app
 
 ## 快速开始
 
-1. 打开 VibeLauncher，点 **新建配置**，选择 Claude 或 ChatGPT，起个名字。
+1. 打开 VibeLauncher，点 **新建配置**，选择 Claude 或 ChatGPT（或用“其他应用…”选一个 Electron、Chromium 应用），起个名字。
 2. 点 **登录…**。应用会以这个全新的空白配置打开，在里面登录；浏览器询问是否打开应用时选择允许。
 3. 完成。之后从 VibeLauncher 打开这个配置，或者打开 **快捷方式**，直接启动它。
 
@@ -144,6 +146,7 @@ Windows 上在“设置 → 应用”里卸载即可，链接和快捷方式会�
 - **Claude 的 Cowork 是共享的**：它的虚拟机属于系统账户，同一时间只有一个配置能使用。
 - **少数全局开关是共享的**，比如 Claude 的“用 Claude 打开”菜单项。
 - **终端里的 `codex` 命令**仍使用默认的 ChatGPT 账号。
+- **自己添加的应用只分开数据文件夹**：应用放在这个文件夹以外的东西仍然共用；它们的登录链接也不会转交，请在配置自己的窗口里登录。
 - VibeLauncher 依赖官方应用目前的行为。如果某次更新改变了这些行为，“诊断”会提示你，VibeLauncher 也会随之更新。
 
 ## 参与贡献

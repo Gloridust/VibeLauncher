@@ -26,12 +26,13 @@ pub struct ShortcutState {
     pub stale: bool,
 }
 
-/// Display name of a profile's shortcut, e.g. "Claude · Work".
-pub fn display_name(p: &Profile) -> String {
+/// Display name of a profile's shortcut, e.g. "Claude · Work". `app` is the
+/// app's display name ([`Config::app_name`]).
+pub fn display_name(app: &str, p: &Profile) -> String {
     if p.isolated {
-        format!("{} · {}", p.provider.display_name(), p.name)
+        format!("{app} · {}", p.name)
     } else {
-        format!("{} (VibeLauncher)", p.provider.display_name())
+        format!("{app} (VibeLauncher)")
     }
 }
 
@@ -45,33 +46,34 @@ fn safe_file_name(s: &str) -> String {
     v.trim().trim_matches('.').to_string()
 }
 
-pub fn shortcut_path(p: &Profile) -> PathBuf {
-    imp::shortcut_path(p)
+pub fn shortcut_path(p: &Profile, app: &str) -> PathBuf {
+    imp::shortcut_path(p, app)
 }
 
-pub fn state(p: &Profile) -> ShortcutState {
-    let path = shortcut_path(p);
+pub fn state(p: &Profile, app: &str) -> ShortcutState {
+    let path = shortcut_path(p, app);
     let exists = path.exists();
     ShortcutState { profile_id: p.id.clone(), stale: exists && imp::is_stale(&path), path, exists }
 }
 
-pub fn create(paths: &Paths, install: Option<&AppInstall>, p: &Profile) -> Result<PathBuf> {
+pub fn create(paths: &Paths, install: Option<&AppInstall>, p: &Profile, app: &str) -> Result<PathBuf> {
     let icon = crate::icon::write_profile_icon(paths, install, p)?;
-    imp::create(paths, p, &icon)
+    imp::create(paths, p, app, &icon)
 }
 
-pub fn remove(p: &Profile) -> Result<()> {
-    imp::remove_path(&shortcut_path(p))
+pub fn remove(p: &Profile, app: &str) -> Result<()> {
+    imp::remove_path(&shortcut_path(p, app))
 }
 
 /// Make the shortcuts match the config: create/refresh wanted ones, remove
 /// ones for deleted profiles or with `shortcut = false`. Returns problems.
-pub fn sync(paths: &Paths, cfg: &Config, installs: &dyn Fn(crate::provider::ProviderKind) -> Option<AppInstall>) -> Vec<String> {
+pub fn sync(paths: &Paths, cfg: &Config, installs: &dyn Fn(&crate::provider::AppId) -> Option<AppInstall>) -> Vec<String> {
     let mut errors = Vec::new();
-    let wanted: Vec<PathBuf> = cfg.profiles.iter().filter(|p| p.shortcut).map(shortcut_path).collect();
+    let wanted: Vec<PathBuf> =
+        cfg.profiles.iter().filter(|p| p.shortcut).map(|p| shortcut_path(p, &cfg.app_name(&p.provider))).collect();
     for p in &cfg.profiles {
         if p.shortcut {
-            if let Err(e) = create(paths, installs(p.provider).as_ref(), p) {
+            if let Err(e) = create(paths, installs(&p.provider).as_ref(), p, &cfg.app_name(&p.provider)) {
                 errors.push(format!("{}: {e:#}", p.name));
             }
         }
@@ -95,26 +97,26 @@ mod imp {
     #[cfg(test)]
     use crate::desktop_entry::DesktopEntry;
 
-    pub fn shortcut_path(p: &Profile) -> PathBuf {
+    pub fn shortcut_path(p: &Profile, _app: &str) -> PathBuf {
         de::user_applications_dir().join(format!("vibelauncher-{}.desktop", p.id))
     }
 
-    pub fn render(p: &Profile, icon: &Path, exe: &str) -> String {
-        let name = de::escape_string(&display_name(p));
+    pub fn render(p: &Profile, app: &str, icon: &Path, exe: &str) -> String {
+        let name = de::escape_string(&display_name(app, p));
         let launch = de::build_exec(&[exe.to_string(), "launch".into(), p.id.clone()]);
         let login = de::build_exec(&[exe.to_string(), "login".into(), p.id.clone()]);
         let manage = de::build_exec(&[exe.to_string()]);
         format!(
             "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nComment={comment}\nExec={launch}\nIcon={icon}\nTerminal=false\nStartupNotify=true\nCategories=Network;Chat;\nNoDisplay=false\nActions=login;manage;\nX-VibeLauncher=true\nX-VibeLauncher-Profile={id}\n\n[Desktop Action login]\nName=Sign in…\nName[zh_CN]=登录…\nExec={login}\n\n[Desktop Action manage]\nName=Manage profiles\nName[zh_CN]=管理配置\nExec={manage}\n",
-            comment = de::escape_string(&format!("Open {} with the “{}” profile", p.provider.display_name(), p.name)),
+            comment = de::escape_string(&format!("Open {app} with the “{}” profile", p.name)),
             icon = de::escape_string(&icon.to_string_lossy()),
             id = p.id,
         )
     }
 
-    pub fn create(_paths: &Paths, p: &Profile, icon: &Path) -> Result<PathBuf> {
-        let path = shortcut_path(p);
-        let text = render(p, icon, &crate::paths::self_exe().to_string_lossy());
+    pub fn create(_paths: &Paths, p: &Profile, app: &str, icon: &Path) -> Result<PathBuf> {
+        let path = shortcut_path(p, app);
+        let text = render(p, app, icon, &crate::paths::self_exe().to_string_lossy());
         crate::paths::write_atomic(&path, text.as_bytes())?;
         Ok(path)
     }
@@ -155,7 +157,7 @@ mod imp {
             p.id = "work".into();
             p.name = "Work".into();
             p.isolated = true;
-            let t = render(&p, Path::new("/x/work.png"), "/opt/Vibe Launcher/vibelauncher");
+            let t = render(&p, "Claude", Path::new("/x/work.png"), "/opt/Vibe Launcher/vibelauncher");
             let e = DesktopEntry::parse(&t);
             assert_eq!(e.main("Name").as_deref(), Some("Claude · Work"));
             assert_eq!(
@@ -177,22 +179,22 @@ mod imp {
         crate::paths::home_dir().join("Applications/VibeLauncher")
     }
 
-    pub fn shortcut_path(p: &Profile) -> PathBuf {
-        dir().join(format!("{}.app", safe_file_name(&display_name(p))))
+    pub fn shortcut_path(p: &Profile, app: &str) -> PathBuf {
+        dir().join(format!("{}.app", safe_file_name(&display_name(app, p))))
     }
 
     fn marker(app: &Path) -> PathBuf {
         app.join("Contents/Resources/vibelauncher-profile")
     }
 
-    pub fn create(paths: &Paths, p: &Profile, icon: &Path) -> Result<PathBuf> {
+    pub fn create(paths: &Paths, p: &Profile, app_name: &str, icon: &Path) -> Result<PathBuf> {
         // A renamed profile leaves its old app behind; remove it.
         for old in all_ours() {
             if std::fs::read_to_string(marker(&old)).ok().as_deref() == Some(p.id.as_str()) {
                 let _ = std::fs::remove_dir_all(&old);
             }
         }
-        let app = shortcut_path(p);
+        let app = shortcut_path(p, app_name);
         std::fs::create_dir_all(dir())?;
         let exe = crate::paths::self_exe().to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
         let script = format!(
@@ -210,7 +212,7 @@ mod imp {
         let plist = app.join("Contents/Info.plist");
         let plutil = |args: &[&str]| Command::new("/usr/bin/plutil").args(args).arg(&plist).status();
         plutil(&["-replace", "CFBundleIdentifier", "-string", &format!("io.github.gloridust.vibelauncher.profile.{}", p.id)])?;
-        plutil(&["-replace", "CFBundleName", "-string", &display_name(p)])?;
+        plutil(&["-replace", "CFBundleName", "-string", &display_name(app_name, p)])?;
         plutil(&["-remove", "CFBundleIconName"])?;
         std::fs::write(marker(&app), &p.id)?;
         std::fs::write(app.join("Contents/Resources/vibelauncher-exe"), crate::paths::self_exe().to_string_lossy().as_bytes())?;
@@ -248,15 +250,15 @@ mod imp {
         appdata.join("Microsoft\\Windows\\Start Menu\\Programs\\VibeLauncher")
     }
 
-    pub fn shortcut_path(p: &Profile) -> PathBuf {
-        dir().join(format!("{}.lnk", safe_file_name(&display_name(p))))
+    pub fn shortcut_path(p: &Profile, app: &str) -> PathBuf {
+        dir().join(format!("{}.lnk", safe_file_name(&display_name(app, p))))
     }
 
     fn index(paths_dir: &Path) -> PathBuf {
         paths_dir.join(".vibelauncher-index")
     }
 
-    pub fn create(_paths: &Paths, p: &Profile, icon: &Path) -> Result<PathBuf> {
+    pub fn create(_paths: &Paths, p: &Profile, app: &str, icon: &Path) -> Result<PathBuf> {
         std::fs::create_dir_all(dir())?;
         // Remove an old shortcut for this profile (renamed profile).
         let idx = index(&dir());
@@ -268,12 +270,12 @@ mod imp {
             }
             _ => true,
         });
-        let path = shortcut_path(p);
+        let path = shortcut_path(p, app);
         let exe = crate::paths::self_exe();
         let mut sl = mslnk::ShellLink::new(&exe)?;
         sl.set_arguments(Some(format!("launch {}", p.id)));
         sl.set_icon_location(Some(icon.to_string_lossy().into_owned()));
-        sl.set_name(Some(format!("Open {} with the “{}” profile", p.provider.display_name(), p.name)));
+        sl.set_name(Some(format!("Open {app} with the “{}” profile", p.name)));
         sl.create_lnk(&path)?;
         lines.push(format!("{}\t{}\t{}", p.id, path.file_name().unwrap().to_string_lossy(), exe.display()));
         std::fs::write(&idx, lines.join("\n"))?;

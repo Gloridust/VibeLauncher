@@ -1,0 +1,45 @@
+// The window's own title bar parts: a drag area and, outside macOS (which
+// keeps its traffic lights), minimise / maximise / close in the app's colours.
+
+import { Theme, Icons } from "theme.slint";
+import { Icon } from "widgets.slint";
+import { App } from "state.slint";
+
+// Drag the window from here; double-click maximises. The move only starts
+// once the pointer has travelled a little, and the compositor then owns the
+// pointer: hand-starting it on press left the press stuck here (the release
+// never comes back), so every later click went nowhere.
+export component DragArea inherits WindowMoveArea {
+    TouchArea {
+        double-clicked => { App.win-maximize(); }
+    }
+}
+
+component WinBtn {
+    in property <string> kind; // "min" | "max" | "close"
+    callback clicked();
+    width: 34px;
+    height: 28px;
+    Rectangle {
+        border-radius: 7px;
+        background: ta.has-hover ? (kind == "close" ? Theme.red : Theme.hover) : transparent;
+    }
+    property <color> fg: ta.has-hover && kind == "close" ? #ffffff : Theme.text-2;
+    if kind == "min": Rectangle { width: 10px; height: 1.2px; background: fg; }
+    if kind == "max" && !App.maximized: Rectangle { width: 9px; height: 9px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; }
+    if kind == "max" && App.maximized: Rectangle {
+        Rectangle { x: (parent.width - 9px) / 2 + 2px; y: (parent.height - 9px) / 2 - 2px; width: 8px; height: 8px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; }
+        Rectangle { x: (parent.width - 9px) / 2 - 1px; y: (parent.height - 9px) / 2 + 1px; width: 8px; height: 8px; border-width: 1.2px; border-color: fg; border-radius: 1.5px; background: Theme.bg; }
+    }
+    if kind == "close": Icon { source: Icons.x; size: 15px; colorize: fg; }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component WindowButtons inherits HorizontalLayout {
+
+    cross-axis-alignment: center;
+    spacing: 2px;
+    WinBtn { kind: "min"; clicked => { App.win-minimize(); } }
+    WinBtn { kind: "max"; clicked => { App.win-maximize(); } }
+    WinBtn { kind: "close"; clicked => { App.win-close(); } }
+}

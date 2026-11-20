@@ -702,3 +702,155 @@ fn shortcut_for(s: &Smoke, name: &str, id: &str) -> PathBuf {
         .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().contains(name)))
         .unwrap_or_else(|| dir.join(format!("(no shortcut for {name})")))
 }
+
+/// An app the user adds (here the stand-in, dressed as an Electron app):
+/// detected, given profiles with their own `--user-data-dir`, recognised
+/// when running, and removed again. Its files stay in a temporary folder in
+/// both modes.
+#[test]
+fn added_app() {
+    let Ok(_) = std::env::var("VL_SMOKE") else {
+        eprintln!("skipped: set VL_SMOKE=sandbox (or ci) to run");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let root = canonical(tmp.path());
+    let mut vars = vec![("VIBELAUNCHER_HOME".to_string(), root.join("home").display().to_string())];
+    if cfg!(target_os = "linux") {
+        for (k, d) in [("XDG_DATA_HOME", "data"), ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache")] {
+            let p = root.join("xdg").join(d);
+            std::fs::create_dir_all(&p).unwrap();
+            vars.push((k.into(), p.display().to_string()));
+        }
+    }
+    let run = |args: &[&str]| {
+        let mut c = Command::new(CMD);
+        c.args(args);
+        for (k, v) in &vars {
+            c.env(k, v);
+        }
+        let out = c.output().expect("run vibelauncher");
+        eprintln!("$ vibelauncher {}\n{}{}", args.join(" "), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        out
+    };
+    let ok = |args: &[&str]| {
+        let out = run(args);
+        assert!(out.status.success(), "`vibelauncher {}` failed", args.join(" "));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let profile = |name: &str| -> Value {
+        let v: Value = serde_json::from_str(&ok(&["list", "--json"])).unwrap();
+        v["profiles"].as_array().unwrap().iter().find(|p| p["name"] == name).cloned().unwrap_or(Value::Null)
+    };
+    let wait_running = |name: &str, want: bool| {
+        let deadline = Instant::now() + Duration::from_secs(40);
+        while profile(name)["running"] != want {
+            assert!(Instant::now() < deadline, "{name} never became running={want}");
+            std::thread::sleep(Duration::from_millis(400));
+        }
+    };
+
+    // Something that isn't Electron or Chromium is turned away, with a reason.
+    let plain = root.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let plain_exe = plain.join(if cfg!(windows) { "Plain.exe" } else { "plain" });
+    std::fs::copy(FAKE, &plain_exe).unwrap();
+    let out = run(&["app", "add", &plain_exe.display().to_string()]);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("Electron"), "a plain program was accepted");
+
+    // The stand-in with the files an Electron build has.
+    let (picked, exe_dir) = make_electron_app(&root);
+    let added = ok(&["app", "add", &picked.display().to_string(), "--name", "Notely"]);
+    assert!(added.contains("`notely`"), "{added}");
+    assert!(ok(&["app", "list"]).contains("Notely"));
+    // Adding it again keeps the one app.
+    ok(&["app", "add", &picked.display().to_string()]);
+    let apps: Value = serde_json::from_str(&ok(&["list", "--json"])).unwrap();
+    assert_eq!(apps["apps"].as_array().unwrap().len(), 1, "{apps}");
+    assert_eq!(profile("Notely")["isolated"], false, "the app's default profile is missing");
+
+    ok(&["create", "Notes Work", "--app", "notely"]);
+    let work = profile("Notes Work");
+    let id = work["id"].as_str().unwrap().to_string();
+    let data = PathBuf::from(work["dataRoot"].as_str().unwrap());
+    let n = launches_in(&exe_dir).len();
+    ok(&["launch", &id]);
+    let l = wait_launch_in(&exe_dir, "Notes Work to start", n, |v| udd_of(v).is_some());
+    assert!(same_dir(&udd_of(&l).unwrap(), &data.join("electron")), "wrong data folder: {l}");
+    // Only the folder flag: no built-in app's variables pointing into the
+    // profile (whatever the test itself inherited is passed on as is).
+    let data_s = data.display().to_string();
+    assert!(
+        !l["env"].as_object().unwrap().values().any(|v| v.as_str().is_some_and(|v| v.starts_with(&data_s))),
+        "an added app got a built-in app's variables: {l}"
+    );
+    wait_running("Notes Work", true);
+
+    // A VibeLauncher opened from a Claude Code session inside "Notes Work"
+    // must not pass that profile's folder on to the app's default profile.
+    let n = launches_in(&exe_dir).len();
+    let default_id = profile("Notely")["id"].as_str().unwrap().to_string();
+    let mut c = Command::new(CMD);
+    c.args(["launch", &default_id]);
+    for (k, v) in &vars {
+        c.env(k, v);
+    }
+    let borrowed = data.join("claude-config");
+    c.env("CLAUDE_CONFIG_DIR", &borrowed).env("CODEX_HOME", data.join("codex-home")).env("CLAUDECODE", "1");
+    assert!(c.status().unwrap().success());
+    let l = wait_launch_in(&exe_dir, "the default profile to start", n, |v| udd_of(v).is_none());
+    let env = l["env"].as_object().unwrap();
+    assert!(
+        !env.contains_key("CLAUDE_CONFIG_DIR") && !env.contains_key("CODEX_HOME"),
+        "the default profile got another profile's folder: {l}"
+    );
+    ok(&["quit", &default_id]);
+    wait_running("Notely", false);
+
+    // Its profiles have to go before the app can.
+    assert!(!run(&["app", "remove", "notely"]).status.success(), "removed an app that still had profiles");
+    ok(&["quit", &id]);
+    wait_running("Notes Work", false);
+    ok(&["delete", &id, "--delete-data"]);
+    ok(&["app", "remove", "notely"]);
+    let after: Value = serde_json::from_str(&ok(&["list", "--json"])).unwrap();
+    assert!(after["apps"].as_array().unwrap().is_empty() && profile("Notely").is_null(), "{after}");
+    let _ = std::fs::write(exe_dir.join("fake-app-stop"), "");
+}
+
+/// The stand-in laid out like an Electron app; returns what the user would
+/// pick and the folder its log is written to.
+#[cfg(not(target_os = "macos"))]
+fn make_electron_app(root: &Path) -> (PathBuf, PathBuf) {
+    let dir = root.join("Notely");
+    std::fs::create_dir_all(dir.join("resources")).unwrap();
+    std::fs::write(dir.join("resources/app.asar"), b"").unwrap();
+    let exe = dir.join(if cfg!(windows) { "Notely.exe" } else { "notely" });
+    std::fs::copy(FAKE, &exe).unwrap();
+    (exe, dir)
+}
+
+#[cfg(target_os = "macos")]
+fn make_electron_app(root: &Path) -> (PathBuf, PathBuf) {
+    let bundle = root.join("Notely.app");
+    let macos = bundle.join("Contents/MacOS");
+    std::fs::create_dir_all(&macos).unwrap();
+    std::fs::create_dir_all(bundle.join("Contents/Frameworks/Electron Framework.framework")).unwrap();
+    std::fs::copy(FAKE, macos.join("Notely")).unwrap();
+    std::fs::write(
+        bundle.join("Contents/Info.plist"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>Notely</string>
+<key>CFBundleIdentifier</key><string>io.github.gloridust.vlsmoke.notely</string>
+<key>CFBundleName</key><string>Notely</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+"#,
+    )
+    .unwrap();
+    let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&bundle).status();
+    (bundle, macos)
+}

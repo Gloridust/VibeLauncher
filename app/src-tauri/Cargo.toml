@@ -10,25 +10,39 @@ name = "vibelauncher-gui"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.7", features = [] }
+slint-build = "1.19"
 
 [dependencies]
 vl-core = { path = "../../crates/vl-core" }
 vibelauncher = { path = "../../crates/vibelauncher" }
-tauri = { version = "2.12", features = [] }
-tauri-plugin-single-instance = "2.5"
-tauri-plugin-dialog = "2.8"
-tauri-plugin-updater = "2.10"
+# Software rendering only: the window never touches the GPU, so graphics
+# drivers can't garble it (the reason for leaving WebKitGTK).
+slint = { version = "1.19", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 url = "2"
-tokio = { version = "1", features = ["rt-multi-thread"] }
-
-[features]
-# The click-through test in CI: lets the page write its results to
-# $VL_SELFTEST_OUT. Pair with VITE_SELFTEST=1 when building the page.
-selftest = []
+image = { version = "0.25", default-features = false, features = ["png"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sys-locale = "0.3"
+# One window at a time: later starts hand their arguments to the first.
+interprocess = "2"
+# Updates: the release feed, and the signature check against our public key.
+ureq = "3"
+minisign-verify = "0.2"
+base64 = "0.22"
+semver = "1"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+flate2 = "1"
+tar = "0.4"
+
+[features]
+# Checks without a screen: page screenshots (VL_SHOT=dir) and the
+# click-through test (VL_SELFTEST_OUT=file). Not in release packages.
+selftest = []

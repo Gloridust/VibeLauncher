@@ -105,6 +105,11 @@ fn command_for(spec: &LaunchSpec) -> Command {
         // gets a normal Dock icon and isn't our child. `--env` passes
         // variables through (launchd would otherwise drop ours).
         let mut c = Command::new("/usr/bin/open");
+        // Launch Services doesn't pass our environment on; don't hand it
+        // anything that mustn't reach the app either way.
+        for k in &spec.remove_env {
+            c.env_remove(k);
+        }
         c.arg("-n").arg("-a").arg(bundle);
         for (k, v) in &spec.set_env {
             c.arg("--env").arg(format!("{k}={v}"));

@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# Opens the real manager window on a CI runner (macOS or Windows) with a few
-# profiles of stand-in apps, checks it stays up, and takes screenshots:
-# English + light, then Chinese + dark. Then it opens the window once more and
-# lets the built-in click-through test (app/src/selftest.ts) create, open,
-# quit, sign in, rename and delete a profile, run Diagnostics and change the
-# settings, and checks what it did with the `vibelauncher` command.
+# Opens the real manager window on a CI runner (Linux under Xvfb, macOS or
+# Windows) with a few profiles of stand-in apps, checks it stays up, and takes
+# screenshots: English + light, then Chinese + dark. Then the built-in
+# click-through test (app/src-tauri/src/selftest.rs, run off-screen with the
+# real window logic) creates, opens, quits, signs in, renames and deletes a
+# profile, runs Diagnostics and changes the settings, and this script checks
+# what it did with the `vibelauncher` command.
 # Everything lives in a temporary VIBELAUNCHER_HOME. Expects release builds of
-# vibelauncher, vibelauncher-gui (with the `selftest` feature and
-# VITE_SELFTEST=1) and vl-fake-app in target/release.
+# vibelauncher, vibelauncher-gui (with the `selftest` feature) and vl-fake-app
+# in target/release.
 #
-# Also runs on Linux for trying it locally (under Xvfb, with private XDG_*
-# folders): RUNNER_TEMP=<folder> bash .github/scripts/window-check.sh
+# To try it locally on Linux, use private XDG_* folders and a scratch HOME:
+# RUNNER_TEMP=<folder> xvfb-run -a bash .github/scripts/window-check.sh
 set -euo pipefail
 
 out="$PWD/window-shots"
 mkdir -p "$out"
 T="$( (cygpath -u "$RUNNER_TEMP" 2>/dev/null) || printf %s "$RUNNER_TEMP")/vlui"
 rm -rf "$T"
-mkdir -p "$T/claude" "$T/chatgpt"
+mkdir -p "$T/claude" "$T/chatgpt" "$T/notes/resources"
 win=false
 [ "${RUNNER_OS:-}" = "Windows" ] && win=true
 ext=""
@@ -37,6 +38,10 @@ else
 fi
 cp "$fake" "$claude"
 cp "$fake" "$chatgpt"
+# An app to add with "Other app…": the stand-in, laid out like an Electron app.
+notes="$T/notes/notes$ext"
+cp "$fake" "$notes"
+: > "$T/notes/resources/app.asar"
 
 cfg=$("$cli" list --json | jq -r .config | tr -d '\r')
 $win && cfg=$(cygpath -u "$cfg")
@@ -125,15 +130,9 @@ open_and_shoot zh-dark
 sed -i.bak -e 's/^language = "zh"/language = "en"/' -e 's/^theme = "dark"/theme = "light"/' "$cfg"
 report="$out/selftest.txt"
 rm -f "$report"
-VL_SELFTEST_OUT="$(native "$report")" "$gui" > "$out/gui-selftest.log" 2>&1 &
-sleep 5
-check_window selftest
-for _ in $(seq 1 180); do
-  grep -qE '^(end|FAIL)' "$report" 2>/dev/null && break
-  sleep 1
-done
-shot "$out/selftest.png"
-stop_gui
+# Runs off-screen and exits by itself; a screenshot after every step.
+VL_SELFTEST_OUT="$(native "$report")" VL_SHOT="$(native "$out/steps")" VL_SELFTEST_PICK="$(native "$notes")" \
+  "$gui" > "$out/gui-selftest.log" 2>&1 || true
 echo "── click-through test ──"
 cat "$report" || { echo "::error::the click-through test didn't run"; exit 1; }
 fail=0
@@ -152,7 +151,14 @@ grep -q 'language = "zh"' "$cfg" && grep -q 'theme = "dark"' "$cfg" \
 grep UISECRET "$T/claude/fake-app-log.jsonl" | grep -q 'ui-test' \
   || { echo "::error::the pasted sign-in link didn't reach the profile"; fail=1; }
 
+# The added app ran with the profile's own folder, and was removed again.
+grep -q 'user-data-dir=.*notes' "$T/notes/fake-app-log.jsonl" \
+  || { echo "::error::the added app's profile didn't start with its own folder"; fail=1; }
+if jq -e '.apps | length > 0' "$out/after.json" >/dev/null; then
+  echo "::error::the app the test added is still there"; fail=1
+fi
+
 # Stop the stand-ins.
-touch "$T/claude/fake-app-stop" "$T/chatgpt/fake-app-stop"
+touch "$T/claude/fake-app-stop" "$T/chatgpt/fake-app-stop" "$T/notes/fake-app-stop"
 ls -la "$out"
 exit $fail

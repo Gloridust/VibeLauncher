@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/vl-core", "crates/vibelauncher", "app/src-tauri"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Gloridust/VibeLauncher"
@@ -13,3 +13,7 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "s"
+
+# A one-line fix in softbuffer's Wayland backend; see vendor/README.md.
+[patch.crates-io]
+softbuffer = { path = "vendor/softbuffer" }

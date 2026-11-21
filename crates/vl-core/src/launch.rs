@@ -167,7 +167,7 @@ fn scrub_bundle_env(c: &mut Command) {
     for k in ["APPDIR", "APPIMAGE", "ARGV0", "OWD"] {
         c.env_remove(k);
     }
-    for k in ["LD_LIBRARY_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0", "GIO_EXTRA_MODULES", "GDK_PIXBUF_MODULE_FILE", "GSETTINGS_SCHEMA_DIR", "PYTHONPATH", "PERLLIB", "QT_PLUGIN_PATH", "XDG_DATA_DIRS", "PATH"] {
+    for k in ["LD_LIBRARY_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0", "GIO_EXTRA_MODULES", "GDK_PIXBUF_MODULE_FILE", "GSETTINGS_SCHEMA_DIR", "PYTHONPATH", "PERLLIB", "QT_PLUGIN_PATH", "XDG_DATA_DIRS", "PATH", "GTK_PATH", "GTK_EXE_PREFIX", "GTK_DATA_PREFIX", "GTK_IM_MODULE_FILE", "GIO_MODULE_DIR", "GI_TYPELIB_PATH"] {
         if let Ok(v) = std::env::var(k) {
             let kept: Vec<&str> = v.split(':').filter(|p| !p.is_empty() && !p.starts_with(&appdir)).collect();
             if kept.is_empty() {

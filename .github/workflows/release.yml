@@ -16,6 +16,7 @@ on:
       - app/src-tauri/tauri.bundle.conf.json
       - app/src-tauri/windows/**
       - .github/scripts/installer-check.sh
+      - .github/scripts/linux-slim.sh
       - .github/scripts/update-files.sh
       - .github/scripts/update-manifest.py
       - crates/vibelauncher/src/lib.rs
@@ -73,9 +74,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          # The window needs only fontconfig and xkbcommon; the AppImage
-          # bundler still expects the GTK/WebKit libraries to be present.
-          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwebkit2gtk-4.1-dev librsvg2-dev patchelf rpm
+          # The window needs only fontconfig and xkbcommon. Tauri's AppImage
+          # step still runs its GTK plugin, which needs GTK to be present;
+          # linux-slim.sh takes what it adds out again.
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libgtk-3-dev librsvg2-dev patchelf rpm
 
       - name: Build the command
         run: cargo build --release --locked -p vibelauncher --target ${{ matrix.target }}
@@ -183,6 +185,12 @@ jobs:
           else
             pnpm tauri bundle --target "$target" --bundles "$bundles" $conf
           fi
+
+      # Tauri's Linux packages are made for a WebKit window: the deb and rpm
+      # depend on WebKitGTK and the AppImage carries GTK. Ours is Slint.
+      - name: Leave GTK and WebKit out (Linux)
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/linux-slim.sh ${{ matrix.target }}
 
       - name: Gather the update files
         if: env.UPDATER_CONFIG != ''

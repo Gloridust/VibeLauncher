@@ -104,6 +104,11 @@ cp target/release/vibelauncher app/src-tauri/binaries/vibelauncher-$(rustc -vV |
 cd app && pnpm install && pnpm tauri bundle --config src-tauri/tauri.bundle.conf.json
 ```
 
+On Linux the bundler needs `libgtk-3-dev` and `rpm`, and its packages are made for a WebKit
+window: the deb and rpm depend on WebKitGTK and the AppImage carries GTK. Release builds then run
+`.github/scripts/linux-slim.sh <target>` (it reads `target/<target>/release/bundle`), which makes
+them again without either.
+
 UI work without a screen: build with `--features selftest` and run
 `VL_SHOT=<folder> target/release/vibelauncher-gui` to save every page and sheet as PNG files, in
 light and dark (it only reads your configuration; set `VIBELAUNCHER_HOME` to use another one).

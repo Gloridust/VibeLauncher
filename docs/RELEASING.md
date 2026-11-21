@@ -13,6 +13,7 @@
 
 - 打标签发版时没有这个 secret，工作流直接失败：否则发出去的版本没有 `latest.json`，旧版本的用户永远收不到更新。
 - 每个平台构建完把自己的更新文件和签名记下来（`.github/scripts/update-files.sh`；Linux 上还检查 deb、rpm、AppImage 里的程序各自知道自己是哪种包），全部成功后 `Update manifest` 任务合成 `latest.json` 挂到草稿上（`.github/scripts/update-manifest.py`）。少一个平台就不生成。
+- Tauri 的 Linux 打包是给 WebKit 窗口准备的：deb、rpm 写死依赖 WebKitGTK 和 GTK，AppImage 用 GTK 插件把整套 GTK（构建机上有 WebKit 时连它的进程）一起打进去。窗口是 Slint 画的，两样都用不上，所以 `.github/scripts/linux-slim.sh` 在签名前把三个包重打一遍：deb 的依赖换成 `dpkg-shlibdeps` 算出的库加上 xkbcommon，rpm 用原来的文件和字段重新 `rpmbuild`，AppImage 去掉 GTK 插件的文件后再用 linuxdeploy 打包（约 11 MB，原来约 90 MB）。包里的文件和写进程序的包类型不变。
 - 更新地址是 `releases/latest/download/latest.json`，所以只有发布成 **Latest** 的版本才会推给用户；预发布、草稿都不会。
 - **私钥丢了就再也发不了能自动安装的更新**（已安装的版本只认这把公钥），务必离线备份。换钥匙只能让用户手动装一次带新公钥的版本。
 

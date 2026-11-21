@@ -66,9 +66,17 @@ case "$os" in
     deb=$(one "$b/deb/*.deb")
     rpm=$(one "$b/rpm/*.rpm")
     t=$(mktemp -d)
-    (cd "$t" && "$OLDPWD/$appimage" --appimage-extract >/dev/null) && marker "$t/squashfs-root/usr/bin/vibelauncher-gui" APP
-    dpkg-deb -x "$deb" "$t/deb" && marker "$t/deb/usr/bin/vibelauncher-gui" DEB
-    mkdir -p "$t/rpm" && (cd "$t/rpm" && rpm2cpio "$OLDPWD/$rpm" | cpio -idm --quiet) && marker "$t/rpm/usr/bin/vibelauncher-gui" RPM
+    # One step per line: a failure in an `a && b` list doesn't stop the script.
+    (cd "$t" && "$OLDPWD/$appimage" --appimage-extract >/dev/null)
+    marker "$t/squashfs-root/usr/bin/vibelauncher-gui" APP
+    dpkg-deb -x "$deb" "$t/deb"
+    marker "$t/deb/usr/bin/vibelauncher-gui" DEB
+    # rpm2cpio (4.17) exits with 1 on these rpms even though it writes all
+    # of the payload; a missing binary still fails the marker check.
+    rpm2cpio "$rpm" > "$t/rpm.cpio" || true
+    mkdir -p "$t/rpm"
+    (cd "$t/rpm" && cpio -idm --quiet < "$t/rpm.cpio")
+    marker "$t/rpm/usr/bin/vibelauncher-gui" RPM
     rm -rf "$t"
     add appimage "$appimage" default
     add deb "$deb"
